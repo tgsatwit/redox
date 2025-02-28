@@ -74,7 +74,6 @@ export function DocumentViewer({
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
   const [isPdf, setIsPdf] = useState(false)
-  const [activeTab, setActiveTab] = useState<string>("image")
   const [isAnalyzingPII, setIsAnalyzingPII] = useState(false)
   const [piiResults, setPiiResults] = useState<ReturnType<typeof findPotentialPII> | null>(null)
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
@@ -236,13 +235,6 @@ export function DocumentViewer({
     }
   }, [zoom, rotation, pdfDocument, pdfCurrentPage, pdfTotalPages, renderPage]);
   
-  // Set active tab to "text" when extractedText becomes available
-  useEffect(() => {
-    if (extractedText && extractedText.length > 0) {
-      setActiveTab("text")
-    }
-  }, [extractedText])
-
   // Reset PII analysis when text changes
   useEffect(() => {
     setPiiResults(null)
@@ -616,237 +608,231 @@ export function DocumentViewer({
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid grid-cols-2">
-          <TabsTrigger value="document">Document</TabsTrigger>
-          <TabsTrigger value="text" disabled={!extractedText}>Text</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="document">
-          <div 
-            className={`overflow-auto border rounded-lg bg-muted/30 flex items-center justify-center p-4 h-[500px] relative ${isAnnotationMode ? 'cursor-crosshair' : ''}`}
-            ref={containerRef}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={() => isDrawing && handleMouseUp()}
-          >
-            {isPdf ? (
-              <div className="w-full h-full flex flex-col items-center justify-center">
-                {pdfLoadError || isBrowserBlocking ? (
-                  <Card className="p-6 flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
-                    <AlertTriangle className="h-12 w-12 text-amber-500" />
-                    <h3 className="text-lg font-medium text-center">PDF Rendering Error</h3>
-                    <p className="text-sm text-center text-muted-foreground">
-                      {isBrowserBlocking 
-                        ? "This page has been blocked by your browser for security reasons. Chrome restricts PDF rendering in certain contexts." 
-                        : pdfLoadError}
-                    </p>
+      <div className="w-full">
+        <div 
+          className={`overflow-auto border rounded-lg bg-muted/30 flex items-center justify-center p-4 h-[500px] relative ${isAnnotationMode ? 'cursor-crosshair' : ''}`}
+          ref={containerRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={() => isDrawing && handleMouseUp()}
+        >
+          {isPdf ? (
+            <div className="w-full h-full flex flex-col items-center justify-center">
+              {pdfLoadError || isBrowserBlocking ? (
+                <Card className="p-6 flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
+                  <AlertTriangle className="h-12 w-12 text-amber-500" />
+                  <h3 className="text-lg font-medium text-center">PDF Rendering Error</h3>
+                  <p className="text-sm text-center text-muted-foreground">
+                    {isBrowserBlocking 
+                      ? "This page has been blocked by your browser for security reasons. Chrome restricts PDF rendering in certain contexts." 
+                      : pdfLoadError}
+                  </p>
+                  
+                  <div className="flex flex-col gap-2 w-full">
+                    <Button 
+                      onClick={handleReloadPdf} 
+                      variant="outline"
+                      disabled={isReloadingPdf}
+                      className="w-full"
+                    >
+                      {isReloadingPdf ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Reloading PDF...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Try Reloading PDF
+                        </>
+                      )}
+                    </Button>
                     
-                    <div className="flex flex-col gap-2 w-full">
-                      <Button 
-                        onClick={handleReloadPdf} 
+                    {/* Add download option for blocked PDFs */}
+                    {(isBrowserBlocking || pdfLoadError) && imageUrl && (
+                      <Button
+                        onClick={() => {
+                          const urlToDownload = objectUrl || imageUrl;
+                          createPdfDownloadLink(urlToDownload, 'document.pdf');
+                        }}
                         variant="outline"
-                        disabled={isReloadingPdf}
-                        className="w-full"
+                        className="w-full mt-1"
                       >
-                        {isReloadingPdf ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Reloading PDF...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            Try Reloading PDF
-                          </>
-                        )}
+                        <FileText className="mr-2 h-4 w-4" />
+                        Download PDF
                       </Button>
-                      
-                      {/* Add download option for blocked PDFs */}
-                      {(isBrowserBlocking || pdfLoadError) && imageUrl && (
-                        <Button
-                          onClick={() => {
-                            const urlToDownload = objectUrl || imageUrl;
-                            createPdfDownloadLink(urlToDownload, 'document.pdf');
-                          }}
-                          variant="outline"
-                          className="w-full mt-1"
-                        >
-                          <FileText className="mr-2 h-4 w-4" />
-                          Download PDF
-                        </Button>
-                      )}
-                      
-                      {/* Add option for page-by-page processing */}
-                      {onRequestPageByPageProcessing && (
-                        <Button
-                          onClick={handlePageByPageRequest}
-                          variant="default"
-                          className="w-full mt-1"
-                        >
-                          <FileSearch className="mr-2 h-4 w-4" />
-                          Process PDF Page by Page
-                        </Button>
-                      )}
-                    </div>
-                  </Card>
-                ) : pdfPageRendering ? (
-                  <div className="flex flex-col items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin mb-2" />
-                    <p>Rendering PDF...</p>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center overflow-auto relative">
-                    <canvas ref={canvasRef} className="max-w-full"></canvas>
-                    {/* Display existing redaction elements */}
-                    {redactionElements && redactionElements.length > 0 && pdfCurrentPage === 1 && (
-                      redactionElements.map(element => element.boundingBox && (
-                        <div 
-                          key={element.id} 
-                          style={{
-                            ...renderBoundingBoxStyle(element.boundingBox),
-                            backgroundColor: 'rgba(255, 0, 0, 0.2)',
-                            border: '2px solid red'
-                          }} 
-                        />
-                      ))
                     )}
                     
-                    {/* Display manual selections */}
-                    {manualSelections.map(selection => selection.boundingBox && (
-                      <div 
-                        key={selection.id} 
-                        style={{
-                          ...renderBoundingBoxStyle(selection.boundingBox),
-                          backgroundColor: 'rgba(0, 0, 255, 0.2)',
-                          border: '2px solid blue'
-                        }}
-                        title={selection.label}
+                    {/* Add option for page-by-page processing */}
+                    {onRequestPageByPageProcessing && (
+                      <Button
+                        onClick={handlePageByPageRequest}
+                        variant="default"
+                        className="w-full mt-1"
                       >
-                        <div className="absolute -top-6 left-0 bg-blue-600 text-white text-xs py-1 px-2 rounded truncate max-w-[150px]">
-                          {selection.label}
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {/* Display current selection */}
-                    {isAnnotationMode && selectionStart && selectionEnd && (
-                      <div 
-                        style={{
-                          position: 'absolute',
-                          left: `${Math.min(selectionStart.x, selectionEnd.x) * 100}%`,
-                          top: `${Math.min(selectionStart.y, selectionEnd.y) * 100}%`,
-                          width: `${Math.abs(selectionEnd.x - selectionStart.x) * 100}%`,
-                          height: `${Math.abs(selectionEnd.y - selectionStart.y) * 100}%`,
-                          backgroundColor: 'rgba(255, 255, 0, 0.2)',
-                          border: '2px dashed orange'
-                        }}
-                      />
+                        <FileSearch className="mr-2 h-4 w-4" />
+                        Process PDF Page by Page
+                      </Button>
                     )}
                   </div>
-                )}
-              </div>
-            ) : (
-              <div
-                style={{
-                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
-                  transformOrigin: "center",
-                  transition: "transform 0.2s ease-in-out",
-                }}
-                className="relative"
-              >
-                <img src={imageUrl || "/placeholder.svg"} alt="Document" className="max-w-full max-h-full object-contain" />
-                
-                {/* Display existing redaction elements */}
-                {redactionElements && redactionElements.length > 0 && (
-                  redactionElements.map(element => element.boundingBox && (
+                </Card>
+              ) : pdfPageRendering ? (
+                <div className="flex flex-col items-center justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                  <p>Rendering PDF...</p>
+                </div>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center overflow-auto relative">
+                  <canvas ref={canvasRef} className="max-w-full"></canvas>
+                  {/* Display existing redaction elements */}
+                  {redactionElements && redactionElements.length > 0 && pdfCurrentPage === 1 && (
+                    redactionElements.map(element => element.boundingBox && (
+                      <div 
+                        key={element.id} 
+                        style={{
+                          ...renderBoundingBoxStyle(element.boundingBox),
+                          backgroundColor: 'rgba(255, 0, 0, 0.2)',
+                          border: '2px solid red'
+                        }} 
+                      />
+                    ))
+                  )}
+                  
+                  {/* Display manual selections */}
+                  {manualSelections.map(selection => selection.boundingBox && (
                     <div 
-                      key={element.id} 
+                      key={selection.id} 
                       style={{
-                        ...renderBoundingBoxStyle(element.boundingBox),
-                        backgroundColor: 'rgba(255, 0, 0, 0.2)',
-                        border: '2px solid red'
-                      }} 
-                    />
-                  ))
-                )}
-                
-                {/* Display manual selections */}
-                {manualSelections.map(selection => selection.boundingBox && (
-                  <div 
-                    key={selection.id} 
-                    style={{
-                      ...renderBoundingBoxStyle(selection.boundingBox),
-                      backgroundColor: 'rgba(0, 0, 255, 0.2)',
-                      border: '2px solid blue'
-                    }}
-                    title={selection.label}
-                  >
-                    <div className="absolute -top-6 left-0 bg-blue-600 text-white text-xs py-1 px-2 rounded truncate max-w-[150px]">
-                      {selection.label}
+                        ...renderBoundingBoxStyle(selection.boundingBox),
+                        backgroundColor: 'rgba(0, 0, 255, 0.2)',
+                        border: '2px solid blue'
+                      }}
+                      title={selection.label}
+                    >
+                      <div className="absolute -top-6 left-0 bg-blue-600 text-white text-xs py-1 px-2 rounded truncate max-w-[150px]">
+                        {selection.label}
+                      </div>
                     </div>
-                  </div>
-                ))}
-                
-                {/* Display current selection */}
-                {isAnnotationMode && selectionStart && selectionEnd && (
+                  ))}
+                  
+                  {/* Display current selection */}
+                  {isAnnotationMode && selectionStart && selectionEnd && (
+                    <div 
+                      style={{
+                        position: 'absolute',
+                        left: `${Math.min(selectionStart.x, selectionEnd.x) * 100}%`,
+                        top: `${Math.min(selectionStart.y, selectionEnd.y) * 100}%`,
+                        width: `${Math.abs(selectionEnd.x - selectionStart.x) * 100}%`,
+                        height: `${Math.abs(selectionEnd.y - selectionStart.y) * 100}%`,
+                        backgroundColor: 'rgba(255, 255, 0, 0.2)',
+                        border: '2px dashed orange'
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                transformOrigin: "center",
+                transition: "transform 0.2s ease-in-out",
+              }}
+              className="relative"
+            >
+              <img src={imageUrl || "/placeholder.svg"} alt="Document" className="max-w-full max-h-full object-contain" />
+              
+              {/* Display existing redaction elements */}
+              {redactionElements && redactionElements.length > 0 && (
+                redactionElements.map(element => element.boundingBox && (
                   <div 
+                    key={element.id} 
                     style={{
-                      position: 'absolute',
-                      left: `${Math.min(selectionStart.x, selectionEnd.x) * 100}%`,
-                      top: `${Math.min(selectionStart.y, selectionEnd.y) * 100}%`,
-                      width: `${Math.abs(selectionEnd.x - selectionStart.x) * 100}%`,
-                      height: `${Math.abs(selectionEnd.y - selectionStart.y) * 100}%`,
-                      backgroundColor: 'rgba(255, 255, 0, 0.2)',
-                      border: '2px dashed orange'
-                    }}
+                      ...renderBoundingBoxStyle(element.boundingBox),
+                      backgroundColor: 'rgba(255, 0, 0, 0.2)',
+                      border: '2px solid red'
+                    }} 
                   />
-                )}
-              </div>
-            )}
-            
-            {/* Label dialog for new selections */}
-            {showLabelDialog && (
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white p-4 rounded-lg shadow-lg border border-gray-300 z-10 min-w-[300px]">
-                <h3 className="text-lg font-medium mb-2">Label Selection</h3>
-                <div className="mb-4">
-                  <label htmlFor="selection-label" className="block text-sm font-medium mb-1">
-                    Label
-                  </label>
-                  <input
-                    id="selection-label"
-                    type="text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    value={selectionLabel}
-                    onChange={(e) => setSelectionLabel(e.target.value)}
-                    placeholder="e.g., Name, Address, SSN"
-                    autoFocus
-                  />
+                ))
+              )}
+              
+              {/* Display manual selections */}
+              {manualSelections.map(selection => selection.boundingBox && (
+                <div 
+                  key={selection.id} 
+                  style={{
+                    ...renderBoundingBoxStyle(selection.boundingBox),
+                    backgroundColor: 'rgba(0, 0, 255, 0.2)',
+                    border: '2px solid blue'
+                  }}
+                  title={selection.label}
+                >
+                  <div className="absolute -top-6 left-0 bg-blue-600 text-white text-xs py-1 px-2 rounded truncate max-w-[150px]">
+                    {selection.label}
+                  </div>
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={handleCancelSelection}>
-                    Cancel
-                  </Button>
-                  <Button 
-                    onClick={handleAddSelection}
-                    disabled={!selectionLabel.trim()}
-                  >
-                    Add Selection
-                  </Button>
-                </div>
+              ))}
+              
+              {/* Display current selection */}
+              {isAnnotationMode && selectionStart && selectionEnd && (
+                <div 
+                  style={{
+                    position: 'absolute',
+                    left: `${Math.min(selectionStart.x, selectionEnd.x) * 100}%`,
+                    top: `${Math.min(selectionStart.y, selectionEnd.y) * 100}%`,
+                    width: `${Math.abs(selectionEnd.x - selectionStart.x) * 100}%`,
+                    height: `${Math.abs(selectionEnd.y - selectionStart.y) * 100}%`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.2)',
+                    border: '2px dashed orange'
+                  }}
+                />
+              )}
+            </div>
+          )}
+          
+          {/* Label dialog for new selections */}
+          {showLabelDialog && (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white p-4 rounded-lg shadow-lg border border-gray-300 z-10 min-w-[300px]">
+              <h3 className="text-lg font-medium mb-2">Label Selection</h3>
+              <div className="mb-4">
+                <label htmlFor="selection-label" className="block text-sm font-medium mb-1">
+                  Label
+                </label>
+                <input
+                  id="selection-label"
+                  type="text"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  value={selectionLabel}
+                  onChange={(e) => setSelectionLabel(e.target.value)}
+                  placeholder="e.g., Name, Address, SSN"
+                  autoFocus
+                />
               </div>
-            )}
-          </div>
-        </TabsContent>
-        
-        <TabsContent value="text">
-          <div className="overflow-auto border rounded-lg bg-white p-4 h-[500px]">
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={handleCancelSelection}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleAddSelection}
+                  disabled={!selectionLabel.trim()}
+                >
+                  Add Selection
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Only render text section if extractedText exists */}
+        {extractedText && (
+          <div className="overflow-auto border rounded-lg bg-white p-4 h-[500px] mt-4">
             {textError ? (
               <div className="p-4 bg-destructive/10 text-destructive rounded-md">
                 {textError}
               </div>
-            ) : extractedText ? (
+            ) : (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-medium">Extracted Text</h3>
@@ -872,7 +858,7 @@ export function DocumentViewer({
                   )}
                 </div>
                 
-                <ScrollArea className="h-[500px] border border-border rounded-md p-4">
+                <ScrollArea className="h-[400px] border border-border rounded-md p-4">
                   {highlightedHtml ? (
                     <div 
                       className="whitespace-pre-wrap font-mono text-sm"
@@ -907,14 +893,10 @@ export function DocumentViewer({
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="flex justify-center items-center h-[300px] border border-border rounded-md">
-                <p className="text-muted-foreground">No text extracted yet</p>
-              </div>
             )}
           </div>
-        </TabsContent>
-      </Tabs>
+        )}
+      </div>
     </div>
   )
 }

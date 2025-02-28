@@ -154,8 +154,12 @@ function createRedactionSVG(fields: ExtractedField[], width: number, height: num
   // Start SVG
   let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`
   
+  // Track elements without bounding boxes to position them in a grid
+  let missingBoxCount = 0;
+  
   // Add redaction boxes
   fields.forEach((field) => {
+    // Handle elements with or without bounding boxes
     if (field.boundingBox) {
       // Handle both BoundingBox and AwsBoundingBox types
       let rectX: number, rectY: number, rectWidth: number, rectHeight: number;
@@ -178,6 +182,31 @@ function createRedactionSVG(fields: ExtractedField[], width: number, height: num
       // Add rectangle
       svg += `<rect x="${rectX}" y="${rectY}" width="${rectWidth}" height="${rectHeight}" 
                 fill="black" fill-opacity="1" />`
+    } else {
+      // For elements without bounding boxes, create default positions in a grid at the top
+      // Calculate position based on count to create a grid
+      const cols = 3; // Number of columns in the grid
+      const boxWidth = Math.min(200, width / cols);
+      const boxHeight = 40;
+      
+      const col = missingBoxCount % cols;
+      const row = Math.floor(missingBoxCount / cols);
+      
+      const rectX = col * (boxWidth + 10) + 10;
+      const rectY = row * (boxHeight + 10) + 10;
+      
+      // Add rectangle with default positioning
+      svg += `<rect x="${rectX}" y="${rectY}" width="${boxWidth}" height="${boxHeight}" 
+                fill="black" fill-opacity="1" />`;
+      
+      // Add text label if available
+      if (field.label) {
+        svg += `<text x="${rectX + boxWidth/2}" y="${rectY + boxHeight/2}" 
+                text-anchor="middle" alignment-baseline="middle" 
+                font-family="Arial" font-size="10" fill="white">${field.label}</text>`;
+      }
+      
+      missingBoxCount++;
     }
   })
   

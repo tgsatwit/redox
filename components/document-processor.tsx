@@ -18,7 +18,7 @@ import {
 import { processDocument } from "@/lib/document-processing"
 import { redactDocument } from "@/lib/redaction"
 import type { DocumentData, DataElementConfig, DocumentTypeConfig, AnyBoundingBox, AwsBoundingBox } from "@/lib/types"
-import { Loader2, FileText, Settings, AlignLeft, AlertTriangle, Scissors, FileSearch, Wrench } from "lucide-react"
+import { Loader2, FileText, Settings, AlignLeft, AlertTriangle, Scissors, FileSearch, Wrench, Eraser } from "lucide-react"
 import { useConfigStore } from "@/lib/config-store"
 import { useRouter } from "next/navigation"
 import { convertPdfToBase64 } from "../lib/pdf-utils"
@@ -1092,19 +1092,27 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
     patterns.forEach(pattern => {
       const matches = text.match(pattern.regex);
       if (matches) {
-        matches.forEach(match => {
+        matches.forEach((match, idx) => {
           // Find position in text
           const index = text.indexOf(match);
           if (index !== -1) {
+            // Add a default bounding box for pattern-detected elements
+            // Position them in a vertical stack in the top-right corner
+            // with slight offsets based on index to make them visible
             detectedElements.push({
               id: `pattern-${pattern.type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
               text: match,
               label: pattern.type, // Extended property
-              type: 'Pattern', // Extended property
+              type: pattern.type, // Use the specific pattern type instead of generic "Pattern"
               confidence: pattern.confidence,
               pageIndex: 0,
-              // We don't have bounding box info from text-only detection
-              // This will be used for display in the list but not for visual redaction
+              // Add default bounding box for pattern-detected elements
+              boundingBox: {
+                Left: 0.7, // Position in right side
+                Top: 0.1 + (idx * 0.05), // Stack vertically with offset
+                Width: 0.25,
+                Height: 0.04
+              }
             });
           }
         });
@@ -1233,6 +1241,9 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="mb-4">
                   <TabsTrigger value="original">Original Document</TabsTrigger>
+                  <TabsTrigger value="text" disabled={!extractedText}>
+                    Extracted Text
+                  </TabsTrigger>
                   <TabsTrigger value="redacted" disabled={!redactedImageUrl}>
                     Redacted Document
                   </TabsTrigger>
@@ -1340,6 +1351,77 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                       <AwsCredentialsHelper />
                     </div>
                   )}
+                </TabsContent>
+                <TabsContent value="text" className="min-h-[400px]">
+                  <div className="rounded-md border bg-muted/40 p-4">
+                    <div className="flex justify-between mb-2">
+                      <h3 className="text-lg font-medium">Extracted Text</h3>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => {
+                          if (extractedText) {
+                            navigator.clipboard.writeText(extractedText);
+                            toast({
+                              title: "Copied to clipboard",
+                              description: "The extracted text has been copied to your clipboard.",
+                              variant: "default"
+                            });
+                          }
+                        }}
+                        disabled={!extractedText}
+                      >
+                        Copy Text
+                      </Button>
+                    </div>
+                    {isExtractingText ? (
+                      <div className="flex justify-center items-center h-64">
+                        <div className="flex flex-col items-center gap-2">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                          <p>Extracting text...</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white border rounded-md p-4 h-96 overflow-y-auto whitespace-pre-wrap font-mono text-sm">
+                        {extractedText || 'No text extracted yet. Use the "Extract Text" button to extract text from the document.'}
+                      </div>
+                    )}
+                    {processError && (
+                      <div className="mt-4 p-3 bg-destructive/10 text-destructive rounded-md">
+                        {processError}
+                      </div>
+                    )}
+                    <div className="mt-4">
+                      <Button 
+                        onClick={handleExtractTextWithPatterns} 
+                        disabled={isExtractingText || !file}
+                        variant="outline" 
+                        className="gap-2"
+                      >
+                        {isExtractingText ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Extracting Text...
+                          </>
+                        ) : (
+                          <>
+                            <AlignLeft className="h-4 w-4" />
+                            {extractedText ? 'Refresh Text' : 'Extract Text'}
+                          </>
+                        )}
+                      </Button>
+                      {extractedText && (
+                        <Button
+                          onClick={() => setActiveTab("original")}
+                          variant="ghost"
+                          className="ml-2"
+                        >
+                          Return to Document
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 </TabsContent>
                 <TabsContent value="redacted" className="min-h-[400px]">
                   {redactedImageUrl && <DocumentViewer 
@@ -1634,28 +1716,34 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 </TabsList>
                 
                 <TabsContent value="list" className="mt-4">
-                  <div className="max-h-60 overflow-y-auto space-y-2">
+                  <div className="max-h-[450px] overflow-y-auto space-y-2">
                     {extractedElements.map(element => (
                       <div 
                         key={element.id}
-                        className={`p-3 border rounded flex flex-col hover:bg-gray-50 ${
-                          selectedElements.includes(element.id) ? 'border-blue-500 bg-blue-50' : ''
+                        className={`p-3 border rounded flex flex-col hover:bg-gray-50 transition-colors ${
+                          selectedElements.includes(element.id) 
+                            ? 'border-blue-500 bg-blue-50 shadow-sm' 
+                            : 'border-gray-200'
                         }`}
                       >
                         <div className="flex items-center space-x-3 cursor-pointer" onClick={() => toggleElementSelection(element.id)}>
                           <Checkbox
                             checked={selectedElements.includes(element.id)}
                             onCheckedChange={() => toggleElementSelection(element.id)}
-                            className="h-5 w-5"
+                            className={`h-5 w-5 ${selectedElements.includes(element.id) ? 'bg-blue-600 border-blue-600' : ''}`}
                           />
                           <div className="flex-1">
-                            <div className="font-medium truncate max-w-md">{element.text}</div>
+                            <div className={`font-medium truncate max-w-md ${selectedElements.includes(element.id) ? 'text-blue-700' : ''}`}>
+                              {element.text}
+                            </div>
                             <div className="text-xs flex items-center gap-2 mt-1">
                               <Badge variant="secondary" className="text-xs">
-                                {(element as ExtendedRedactionElement).type || 'Text'}
+                                {(element as ExtendedRedactionElement).type === '' 
+                                  ? 'None' 
+                                  : (element as ExtendedRedactionElement).type || 'Text'}
                               </Badge>
                               <span className="text-muted-foreground">
-                                Page: {element.pageIndex + 1} | Confidence: {(element.confidence * 100).toFixed(0)}%
+                                Page: {element.pageIndex + 1} | Confidence: {Math.min(100, (element.confidence * 100)).toFixed(0)}%
                               </span>
                             </div>
                           </div>
@@ -1666,20 +1754,28 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                           <div className="mt-2 pt-2 border-t border-dashed flex items-center gap-2">
                             <div className="text-xs font-medium">Change type:</div>
                             <Select
-                              value={(element as ExtendedRedactionElement).type || 'Text'}
+                              value={
+                                (element as ExtendedRedactionElement).type === '' 
+                                  ? 'none' 
+                                  : (element as ExtendedRedactionElement).type || 'Text'
+                              }
                               onValueChange={(value) => {
                                 // Update the element type
                                 setExtractedElements(prev => 
                                   prev.map(el => 
                                     el.id === element.id 
-                                      ? {...el, type: value, label: value} 
+                                      ? {
+                                          ...el, 
+                                          type: value === 'none' ? '' : value, 
+                                          label: value === 'none' ? '' : value
+                                        } 
                                       : el
                                   )
                                 );
                                 
                                 toast({
                                   title: "Element type changed",
-                                  description: `Changed to: ${value}`,
+                                  description: `Changed to: ${value === 'none' ? 'None' : value}`,
                                   variant: "default"
                                 });
                               }}
@@ -1688,8 +1784,9 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                                 <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
-                                {activeDocType.dataElements.map((de) => (
-                                  <SelectItem key={de.id} value={de.type}>
+                                <SelectItem value="none">None</SelectItem>
+                                {activeDocType?.dataElements.map((de) => (
+                                  <SelectItem key={de.id} value={de.type || de.name}>
                                     {de.name}
                                   </SelectItem>
                                 ))}
@@ -1773,7 +1870,9 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                                 <div className="truncate max-w-md">{element.text}</div>
                                 <div className="text-xs flex items-center gap-2 mt-1">
                                   <Badge variant="secondary" className="text-xs">
-                                    {(element as ExtendedRedactionElement).type || 'Text'}
+                                    {(element as ExtendedRedactionElement).type === '' 
+                                      ? 'None' 
+                                      : (element as ExtendedRedactionElement).type || 'Text'}
                                   </Badge>
                                 </div>
                               </div>
@@ -1786,16 +1885,14 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 </TabsContent>
               </Tabs>
               
-              {selectedElements.length > 0 && (
-                <Button 
-                  onClick={handleApplyRedactions}
-                  className="mt-4"
-                  disabled={isProcessingPageByPage}
-                >
-                  <Scissors className="mr-2 h-4 w-4" />
-                  Apply Redactions ({selectedElements.length})
-                </Button>
-              )}
+              <Button
+                className="bg-red-600 text-white hover:bg-red-700 mt-4"
+                disabled={selectedElements.length === 0 || isProcessing}
+                onClick={handleApplyRedactions}
+              >
+                <Eraser className="mr-2 h-4 w-4" />
+                Apply Redactions ({selectedElements.length})
+              </Button>
             </Card>
           )}
         </div>

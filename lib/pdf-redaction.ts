@@ -1,6 +1,6 @@
 import { ensurePdfJsLoaded } from '@/lib/pdf-preloader';
 import { splitPdfIntoPages, combinePdfPages, mapTextractCoordinatesToPdf } from './pdf-utils';
-import { PDFDocument, rgb, degrees } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
 import { AnyBoundingBox, WordBlock } from './types';
 
 /**
@@ -264,6 +264,9 @@ export async function applyRedactionsToPdf(
       redactionsByPage[pageIndex].push(element);
     });
     
+    // Use a Map to track missing box counts for each page
+    const missingBoxCountMap = new Map<number, number>();
+    
     // Apply redactions page by page
     const pageIndexes = Object.keys(redactionsByPage).map(Number);
     for (let i = 0; i < pageIndexes.length; i++) {
@@ -341,10 +344,17 @@ export async function applyRedactionsToPdf(
           } else {
             // Regular format (x, y, width, height)
             x = boundingBox.x * width;
-            y = height - (boundingBox.y * height) - (boundingBox.height * height); // Flip Y-axis
+            y = height - (boundingBox.y * height) - (boundingBox.y * height); // Flip Y-axis
             boxWidth = boundingBox.width * width;
             boxHeight = boundingBox.height * height;
           }
+          
+          // Apply some padding for better coverage
+          const padding = 2;
+          x = Math.max(0, x - padding);
+          y = Math.max(0, y - padding);
+          boxWidth += padding * 2;
+          boxHeight += padding * 2;
           
           // Draw a rectangle to cover the text
           page.drawRectangle({
@@ -356,6 +366,62 @@ export async function applyRedactionsToPdf(
             opacity: 1,
             borderWidth: 0
           });
+        }
+        // Handle elements without bounding boxes
+        else {
+          // For elements without bounding boxes, we'll add them at the top of the page in a grid
+          // Use our Map to track how many missing boxes have been added to each page
+          if (!missingBoxCountMap.has(pageIndex)) {
+            missingBoxCountMap.set(pageIndex, 0);
+          }
+          
+          const missingBoxCount = missingBoxCountMap.get(pageIndex) || 0;
+          missingBoxCountMap.set(pageIndex, missingBoxCount + 1);
+          
+          const cols = 3; // Number of columns in the grid
+          const boxWidth = Math.min(200, width / cols);
+          const boxHeight = 40;
+          
+          const col = missingBoxCount % cols;
+          const row = Math.floor(missingBoxCount / cols);
+          
+          const x = col * (boxWidth + 10) + 10;
+          const y = height - ((row * (boxHeight + 10) + 10) + boxHeight); // Adjust for PDF coordinates
+          
+          // Draw a rectangle at the default position
+          page.drawRectangle({
+            x,
+            y,
+            width: boxWidth,
+            height: boxHeight,
+            color: rgb(redactionColor[0], redactionColor[1], redactionColor[2]),
+            opacity: 1,
+            borderWidth: 0
+          });
+          
+          // If we have text content, add it as a label for reference
+          if (redaction.text) {
+            // Create a smaller black rectangle for the text
+            const fontSize = 8;
+            page.drawRectangle({
+              x: x + boxWidth / 2 - 50,
+              y: y - 15,
+              width: 100,
+              height: 12,
+              color: rgb(0.2, 0.2, 0.2),
+              opacity: 1,
+              borderWidth: 0
+            });
+            
+            // Add white text
+            page.drawText(`Redacted: ${redaction.text.substring(0, 15)}${redaction.text.length > 15 ? '...' : ''}`, {
+              x: x + boxWidth / 2 - 45,
+              y: y - 12,
+              size: fontSize,
+              color: rgb(1, 1, 1),  // White text
+              font: await pdfDoc.embedFont(StandardFonts.Helvetica)
+            });
+          }
         }
       }
     }
