@@ -4,7 +4,9 @@ import { v4 as uuidv4 } from 'uuid'
 import type { 
   DocumentTypeConfig, 
   DataElementConfig,
-  AppConfig
+  AppConfig,
+  TrainingDataset,
+  TrainingExample
 } from './types'
 
 // Default data elements
@@ -212,6 +214,21 @@ type ConfigState = {
   addDataElement: (documentTypeId: string, dataElement: Omit<DataElementConfig, 'id'>) => void
   updateDataElement: (documentTypeId: string, dataElementId: string, updates: Partial<DataElementConfig>) => void
   deleteDataElement: (documentTypeId: string, dataElementId: string) => void
+  
+  // Training dataset management
+  addTrainingDataset: (documentTypeId: string, dataset: Omit<TrainingDataset, 'id'>) => void
+  updateTrainingDataset: (documentTypeId: string, datasetId: string, updates: Partial<TrainingDataset>) => void
+  deleteTrainingDataset: (documentTypeId: string, datasetId: string) => void
+  
+  // Training examples management
+  addTrainingExample: (documentTypeId: string, datasetId: string, example: Omit<TrainingExample, 'id'>) => void
+  updateTrainingExample: (documentTypeId: string, datasetId: string, exampleId: string, updates: Partial<TrainingExample>) => void
+  deleteTrainingExample: (documentTypeId: string, datasetId: string, exampleId: string) => void
+  
+  // Model management
+  updateModelStatus: (documentTypeId: string, datasetId: string, modelStatus: TrainingDataset['modelStatus'], modelId?: string, modelArn?: string) => void
+  setDefaultModelForDocType: (documentTypeId: string, modelId: string) => void
+  
   resetToDefaults: () => void
 }
 
@@ -309,10 +326,205 @@ export const useConfigStore = create<ConfigState>()(
         }
       })),
       
+      // Training dataset management
+      addTrainingDataset: (documentTypeId, dataset) => set((state) => {
+        const newDataset = {
+          ...dataset,
+          id: uuidv4(),
+        };
+        
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: [...(docType.trainingDatasets || []), newDataset],
+              };
+            }),
+          },
+        };
+      }),
+      
+      updateTrainingDataset: (documentTypeId, datasetId, updates) => set((state) => {
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: (docType.trainingDatasets || []).map((dataset) => {
+                  if (dataset.id !== datasetId) return dataset;
+                  
+                  return {
+                    ...dataset,
+                    ...updates,
+                  };
+                }),
+              };
+            }),
+          },
+        };
+      }),
+      
+      deleteTrainingDataset: (documentTypeId, datasetId) => set((state) => {
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: (docType.trainingDatasets || []).filter(
+                  (dataset) => dataset.id !== datasetId
+                ),
+                // If the default model was from this dataset, clear it
+                defaultModelId: docType.defaultModelId && 
+                               (docType.trainingDatasets || []).some(
+                                 d => d.id === datasetId && d.modelId === docType.defaultModelId
+                               ) ? undefined : docType.defaultModelId
+              };
+            }),
+          },
+        };
+      }),
+      
+      // Training examples management
+      addTrainingExample: (documentTypeId, datasetId, example) => set((state) => {
+        const newExample = {
+          ...example,
+          id: uuidv4(),
+        };
+        
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: (docType.trainingDatasets || []).map((dataset) => {
+                  if (dataset.id !== datasetId) return dataset;
+                  
+                  return {
+                    ...dataset,
+                    examples: [...dataset.examples, newExample],
+                  };
+                }),
+              };
+            }),
+          },
+        };
+      }),
+      
+      updateTrainingExample: (documentTypeId, datasetId, exampleId, updates) => set((state) => {
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: (docType.trainingDatasets || []).map((dataset) => {
+                  if (dataset.id !== datasetId) return dataset;
+                  
+                  return {
+                    ...dataset,
+                    examples: dataset.examples.map((example) => {
+                      if (example.id !== exampleId) return example;
+                      
+                      return {
+                        ...example,
+                        ...updates,
+                      };
+                    }),
+                  };
+                }),
+              };
+            }),
+          },
+        };
+      }),
+      
+      deleteTrainingExample: (documentTypeId, datasetId, exampleId) => set((state) => {
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: (docType.trainingDatasets || []).map((dataset) => {
+                  if (dataset.id !== datasetId) return dataset;
+                  
+                  return {
+                    ...dataset,
+                    examples: dataset.examples.filter(
+                      (example) => example.id !== exampleId
+                    ),
+                  };
+                }),
+              };
+            }),
+          },
+        };
+      }),
+      
+      // Model management
+      updateModelStatus: (documentTypeId, datasetId, modelStatus, modelId, modelArn) => set((state) => {
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                trainingDatasets: (docType.trainingDatasets || []).map((dataset) => {
+                  if (dataset.id !== datasetId) return dataset;
+                  
+                  return {
+                    ...dataset,
+                    modelStatus,
+                    ...(modelId ? { modelId } : {}),
+                    ...(modelArn ? { modelArn } : {}),
+                    ...(modelStatus === 'TRAINED' ? { lastTrainedDate: Date.now() } : {}),
+                  };
+                }),
+              };
+            }),
+          },
+        };
+      }),
+      
+      setDefaultModelForDocType: (documentTypeId, modelId) => set((state) => {
+        return {
+          config: {
+            ...state.config,
+            documentTypes: state.config.documentTypes.map((docType) => {
+              if (docType.id !== documentTypeId) return docType;
+              
+              return {
+                ...docType,
+                defaultModelId: modelId,
+              };
+            }),
+          },
+        };
+      }),
+      
       resetToDefaults: () => set({ config: initialConfig })
     }),
     {
-      name: 'document-processor-config'
-    }
+      name: 'document-processor-config',
+    } as PersistOptions<ConfigState, unknown>
   )
 ) 

@@ -41,6 +41,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Plus, Pencil, Trash2, AlertTriangle, Save, X } from "lucide-react"
 import { useConfigStore } from "@/lib/config-store"
 import type { DocumentTypeConfig, DataElementConfig, DataElementType, DataElementCategory, DataElementAction } from "@/lib/types"
+import { TrainingDatasetPanel } from "./training-dataset-panel"
+import { ClassificationFeedbackStats } from "./classification-feedback-stats"
+import { useToast } from "@/components/ui/use-toast"
 
 export function DocumentConfigManager() {
   const { 
@@ -61,6 +64,7 @@ export function DocumentConfigManager() {
   const [editElementOpen, setEditElementOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState("data-elements")
   
   const [newDocType, setNewDocType] = useState({
     name: "",
@@ -79,6 +83,8 @@ export function DocumentConfigManager() {
   })
   
   const activeDocumentType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId) || config.documentTypes[0]
+  
+  const { toast } = useToast()
   
   // Handle document type selection
   const handleDocTypeSelect = (id: string) => {
@@ -177,6 +183,37 @@ export function DocumentConfigManager() {
       default: return ''
     }
   }
+
+  // Add a function to handle training with feedback
+  const handleTrainWithFeedback = async (documentType: string, count: number) => {
+    if (!documentType) {
+      throw new Error('Document type is required');
+    }
+    
+    try {
+      const response = await fetch('/api/train-with-feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          documentType,
+          count
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error initiating training:', error);
+      throw error;
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -364,342 +401,371 @@ export function DocumentConfigManager() {
                     </div>
                   </div>
                   
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-medium">Data Elements</h4>
-                      <Dialog open={newElementOpen} onOpenChange={setNewElementOpen}>
-                        <DialogTrigger asChild>
-                          <Button size="sm" variant="outline" className="gap-1">
-                            <Plus className="h-4 w-4" />
-                            Add Element
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Add Data Element</DialogTitle>
-                            <DialogDescription>
-                              Configure a new data element to extract or redact from documents.
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="grid gap-4 py-4">
-                            <div className="grid gap-2">
-                              <Label htmlFor="element-name">Name</Label>
-                              <Input
-                                id="element-name"
-                                value={newDataElement.name}
-                                onChange={(e) => setNewDataElement({...newDataElement, name: e.target.value})}
-                                placeholder="e.g. Invoice Number, Total Amount"
-                              />
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="element-type">Data Type</Label>
-                              <Select
-                                value={newDataElement.type}
-                                onValueChange={(value: DataElementType) => 
-                                  setNewDataElement({...newDataElement, type: value})
-                                }
-                              >
-                                <SelectTrigger id="element-type">
-                                  <SelectValue placeholder="Select type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Text">Text</SelectItem>
-                                  <SelectItem value="Number">Number</SelectItem>
-                                  <SelectItem value="Date">Date</SelectItem>
-                                  <SelectItem value="Currency">Currency</SelectItem>
-                                  <SelectItem value="Email">Email</SelectItem>
-                                  <SelectItem value="Phone">Phone Number</SelectItem>
-                                  <SelectItem value="Address">Address</SelectItem>
-                                  <SelectItem value="Name">Name</SelectItem>
-                                  <SelectItem value="SSN">SSN</SelectItem>
-                                  <SelectItem value="CreditCard">Credit Card</SelectItem>
-                                  <SelectItem value="Custom">Custom</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="element-category">Category</Label>
-                              <Select
-                                value={newDataElement.category}
-                                onValueChange={(value: DataElementCategory) => 
-                                  setNewDataElement({...newDataElement, category: value})
-                                }
-                              >
-                                <SelectTrigger id="element-category">
-                                  <SelectValue placeholder="Select category" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="General">General</SelectItem>
-                                  <SelectItem value="PII">PII</SelectItem>
-                                  <SelectItem value="Financial">Financial</SelectItem>
-                                  <SelectItem value="Medical">Medical</SelectItem>
-                                  <SelectItem value="Legal">Legal</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="element-action">Action</Label>
-                              <Select
-                                value={newDataElement.action}
-                                onValueChange={(value: DataElementAction) => 
-                                  setNewDataElement({...newDataElement, action: value})
-                                }
-                              >
-                                <SelectTrigger id="element-action">
-                                  <SelectValue placeholder="Select action" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Extract">Extract Only</SelectItem>
-                                  <SelectItem value="Redact">Redact Only</SelectItem>
-                                  <SelectItem value="ExtractAndRedact">Extract and Redact</SelectItem>
-                                  <SelectItem value="Ignore">Ignore</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {getActionDescription(newDataElement.action)}
-                              </p>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="element-description">Description (Optional)</Label>
-                              <Textarea
-                                id="element-description"
-                                value={newDataElement.description}
-                                onChange={(e) => setNewDataElement({...newDataElement, description: e.target.value})}
-                                placeholder="Describe this data element..."
-                              />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Label htmlFor="element-required">Required</Label>
-                              <Switch
-                                id="element-required"
-                                checked={!!newDataElement.required}
-                                onCheckedChange={(checked) => 
-                                  setNewDataElement({...newDataElement, required: checked})
-                                }
-                              />
-                              <span className="text-sm text-muted-foreground ml-1">
-                                {newDataElement.required ? 'Required' : 'Optional'}
-                              </span>
-                            </div>
-                          </div>
-                          <DialogFooter>
-                            <Button variant="outline" onClick={() => setNewElementOpen(false)}>Cancel</Button>
-                            <Button onClick={handleCreateDataElement}>Add Element</Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    </div>
+                  <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                    <TabsList className="grid grid-cols-2 mb-4">
+                      <TabsTrigger value="data-elements">Data Elements</TabsTrigger>
+                      <TabsTrigger value="training-data">Classification Training</TabsTrigger>
+                    </TabsList>
                     
-                    {docType.dataElements.length === 0 ? (
-                      <div className="p-6 text-center border rounded-md bg-muted/20">
-                        <p className="text-muted-foreground">No data elements configured.</p>
-                        <Button 
-                          variant="outline" 
-                          className="mt-2"
-                          onClick={() => setNewElementOpen(true)}
-                        >
-                          Add Data Element
-                        </Button>
-                      </div>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead>Category</TableHead>
-                            <TableHead>Action</TableHead>
-                            <TableHead className="w-[100px]">Options</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {docType.dataElements.map((element) => (
-                            <TableRow key={element.id}>
-                              <TableCell className="font-medium">
-                                {element.name}
-                                {element.required && (
-                                  <span className="ml-1 text-red-500">*</span>
-                                )}
-                                {element.isDefault && (
-                                  <Badge variant="outline" className="ml-2 text-xs">Default</Badge>
-                                )}
-                              </TableCell>
-                              <TableCell>{element.type}</TableCell>
-                              <TableCell>
-                                <Badge className={getCategoryColor(element.category)}>
-                                  {element.category}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">
-                                  {element.action === 'Extract' && 'Extract Only'}
-                                  {element.action === 'Redact' && 'Redact Only'}
-                                  {element.action === 'ExtractAndRedact' && 'Extract & Redact'}
-                                  {element.action === 'Ignore' && 'Ignore'}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => openEditElement(element)}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-destructive"
-                                    onClick={() => handleDeleteDataElement(element.id)}
-                                    disabled={element.isDefault}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                    <TabsContent value="data-elements">
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <h4 className="font-medium">Data Elements</h4>
+                          <Dialog open={newElementOpen} onOpenChange={setNewElementOpen}>
+                            <DialogTrigger asChild>
+                              <Button size="sm" variant="outline" className="gap-1">
+                                <Plus className="h-4 w-4" />
+                                Add Element
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Add Data Element</DialogTitle>
+                                <DialogDescription>
+                                  Configure a new data element to extract or redact from documents.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                  <Label htmlFor="element-name">Name</Label>
+                                  <Input
+                                    id="element-name"
+                                    value={newDataElement.name}
+                                    onChange={(e) => setNewDataElement({...newDataElement, name: e.target.value})}
+                                    placeholder="e.g. Invoice Number, Total Amount"
+                                  />
                                 </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    )}
-                    
-                    <Dialog open={editElementOpen} onOpenChange={setEditElementOpen}>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Edit Data Element</DialogTitle>
-                          <DialogDescription>
-                            Update the configuration for this data element.
-                          </DialogDescription>
-                        </DialogHeader>
-                        {currentDataElement && (
-                          <div className="grid gap-4 py-4">
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-element-name">Name</Label>
-                              <Input
-                                id="edit-element-name"
-                                value={currentDataElement.name}
-                                onChange={(e) => setCurrentDataElement({
-                                  ...currentDataElement,
-                                  name: e.target.value
-                                })}
-                              />
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-element-type">Data Type</Label>
-                              <Select
-                                value={currentDataElement.type}
-                                onValueChange={(value: DataElementType) => 
-                                  setCurrentDataElement({
-                                    ...currentDataElement,
-                                    type: value
-                                  })
-                                }
-                                disabled={currentDataElement.isDefault}
-                              >
-                                <SelectTrigger id="edit-element-type">
-                                  <SelectValue placeholder="Select type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Text">Text</SelectItem>
-                                  <SelectItem value="Number">Number</SelectItem>
-                                  <SelectItem value="Date">Date</SelectItem>
-                                  <SelectItem value="Currency">Currency</SelectItem>
-                                  <SelectItem value="Email">Email</SelectItem>
-                                  <SelectItem value="Phone">Phone Number</SelectItem>
-                                  <SelectItem value="Address">Address</SelectItem>
-                                  <SelectItem value="Name">Name</SelectItem>
-                                  <SelectItem value="SSN">SSN</SelectItem>
-                                  <SelectItem value="CreditCard">Credit Card</SelectItem>
-                                  <SelectItem value="Custom">Custom</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-element-category">Category</Label>
-                              <Select
-                                value={currentDataElement.category}
-                                onValueChange={(value: DataElementCategory) => 
-                                  setCurrentDataElement({
-                                    ...currentDataElement,
-                                    category: value
-                                  })
-                                }
-                                disabled={currentDataElement.isDefault}
-                              >
-                                <SelectTrigger id="edit-element-category">
-                                  <SelectValue placeholder="Select category" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="General">General</SelectItem>
-                                  <SelectItem value="PII">PII</SelectItem>
-                                  <SelectItem value="Financial">Financial</SelectItem>
-                                  <SelectItem value="Medical">Medical</SelectItem>
-                                  <SelectItem value="Legal">Legal</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-element-action">Action</Label>
-                              <Select
-                                value={currentDataElement.action}
-                                onValueChange={(value: DataElementAction) => 
-                                  setCurrentDataElement({
-                                    ...currentDataElement,
-                                    action: value
-                                  })
-                                }
-                              >
-                                <SelectTrigger id="edit-element-action">
-                                  <SelectValue placeholder="Select action" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Extract">Extract Only</SelectItem>
-                                  <SelectItem value="Redact">Redact Only</SelectItem>
-                                  <SelectItem value="ExtractAndRedact">Extract and Redact</SelectItem>
-                                  <SelectItem value="Ignore">Ignore</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {getActionDescription(currentDataElement.action)}
-                              </p>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-element-description">Description (Optional)</Label>
-                              <Textarea
-                                id="edit-element-description"
-                                value={currentDataElement.description || ""}
-                                onChange={(e) => setCurrentDataElement({
-                                  ...currentDataElement,
-                                  description: e.target.value
-                                })}
-                              />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Label htmlFor="edit-element-required">Required</Label>
-                              <Switch
-                                id="edit-element-required"
-                                checked={!!currentDataElement.required}
-                                onCheckedChange={(checked) => 
-                                  setCurrentDataElement({
-                                    ...currentDataElement,
-                                    required: checked
-                                  })
-                                }
-                              />
-                              <span className="text-sm text-muted-foreground ml-1">
-                                {currentDataElement.required ? 'Required' : 'Optional'}
-                              </span>
-                            </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="element-type">Data Type</Label>
+                                  <Select
+                                    value={newDataElement.type}
+                                    onValueChange={(value: DataElementType) => 
+                                      setNewDataElement({...newDataElement, type: value})
+                                    }
+                                  >
+                                    <SelectTrigger id="element-type">
+                                      <SelectValue placeholder="Select type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Text">Text</SelectItem>
+                                      <SelectItem value="Number">Number</SelectItem>
+                                      <SelectItem value="Date">Date</SelectItem>
+                                      <SelectItem value="Currency">Currency</SelectItem>
+                                      <SelectItem value="Email">Email</SelectItem>
+                                      <SelectItem value="Phone">Phone Number</SelectItem>
+                                      <SelectItem value="Address">Address</SelectItem>
+                                      <SelectItem value="Name">Name</SelectItem>
+                                      <SelectItem value="SSN">SSN</SelectItem>
+                                      <SelectItem value="CreditCard">Credit Card</SelectItem>
+                                      <SelectItem value="Custom">Custom</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="element-category">Category</Label>
+                                  <Select
+                                    value={newDataElement.category}
+                                    onValueChange={(value: DataElementCategory) => 
+                                      setNewDataElement({...newDataElement, category: value})
+                                    }
+                                  >
+                                    <SelectTrigger id="element-category">
+                                      <SelectValue placeholder="Select category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="General">General</SelectItem>
+                                      <SelectItem value="PII">PII</SelectItem>
+                                      <SelectItem value="Financial">Financial</SelectItem>
+                                      <SelectItem value="Medical">Medical</SelectItem>
+                                      <SelectItem value="Legal">Legal</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="element-action">Action</Label>
+                                  <Select
+                                    value={newDataElement.action}
+                                    onValueChange={(value: DataElementAction) => 
+                                      setNewDataElement({...newDataElement, action: value})
+                                    }
+                                  >
+                                    <SelectTrigger id="element-action">
+                                      <SelectValue placeholder="Select action" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Extract">Extract Only</SelectItem>
+                                      <SelectItem value="Redact">Redact Only</SelectItem>
+                                      <SelectItem value="ExtractAndRedact">Extract and Redact</SelectItem>
+                                      <SelectItem value="Ignore">Ignore</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {getActionDescription(newDataElement.action)}
+                                  </p>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="element-description">Description (Optional)</Label>
+                                  <Textarea
+                                    id="element-description"
+                                    value={newDataElement.description}
+                                    onChange={(e) => setNewDataElement({...newDataElement, description: e.target.value})}
+                                    placeholder="Describe this data element..."
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Label htmlFor="element-required">Required</Label>
+                                  <Switch
+                                    id="element-required"
+                                    checked={!!newDataElement.required}
+                                    onCheckedChange={(checked) => 
+                                      setNewDataElement({...newDataElement, required: checked})
+                                    }
+                                  />
+                                  <span className="text-sm text-muted-foreground ml-1">
+                                    {newDataElement.required ? 'Required' : 'Optional'}
+                                  </span>
+                                </div>
+                              </div>
+                              <DialogFooter>
+                                <Button variant="outline" onClick={() => setNewElementOpen(false)}>Cancel</Button>
+                                <Button onClick={handleCreateDataElement}>Add Element</Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        </div>
+                        
+                        {docType.dataElements.length === 0 ? (
+                          <div className="p-6 text-center border rounded-md bg-muted/20">
+                            <p className="text-muted-foreground">No data elements configured.</p>
+                            <Button 
+                              variant="outline" 
+                              className="mt-2"
+                              onClick={() => setNewElementOpen(true)}
+                            >
+                              Add Data Element
+                            </Button>
                           </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Name</TableHead>
+                                <TableHead>Type</TableHead>
+                                <TableHead>Category</TableHead>
+                                <TableHead>Action</TableHead>
+                                <TableHead className="w-[100px]">Options</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {docType.dataElements.map((element) => (
+                                <TableRow key={element.id}>
+                                  <TableCell className="font-medium">
+                                    {element.name}
+                                    {element.required && (
+                                      <span className="ml-1 text-red-500">*</span>
+                                    )}
+                                    {element.isDefault && (
+                                      <Badge variant="outline" className="ml-2 text-xs">Default</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>{element.type}</TableCell>
+                                  <TableCell>
+                                    <Badge className={getCategoryColor(element.category)}>
+                                      {element.category}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline">
+                                      {element.action === 'Extract' && 'Extract Only'}
+                                      {element.action === 'Redact' && 'Redact Only'}
+                                      {element.action === 'ExtractAndRedact' && 'Extract & Redact'}
+                                      {element.action === 'Ignore' && 'Ignore'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => openEditElement(element)}
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-destructive"
+                                        onClick={() => handleDeleteDataElement(element.id)}
+                                        disabled={element.isDefault}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
                         )}
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setEditElementOpen(false)}>Cancel</Button>
-                          <Button onClick={handleUpdateDataElement}>Save Changes</Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
+                        
+                        <Dialog open={editElementOpen} onOpenChange={setEditElementOpen}>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Edit Data Element</DialogTitle>
+                              <DialogDescription>
+                                Update the configuration for this data element.
+                              </DialogDescription>
+                            </DialogHeader>
+                            {currentDataElement && (
+                              <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                  <Label htmlFor="edit-element-name">Name</Label>
+                                  <Input
+                                    id="edit-element-name"
+                                    value={currentDataElement.name}
+                                    onChange={(e) => setCurrentDataElement({
+                                      ...currentDataElement,
+                                      name: e.target.value
+                                    })}
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="edit-element-type">Data Type</Label>
+                                  <Select
+                                    value={currentDataElement.type}
+                                    onValueChange={(value: DataElementType) => 
+                                      setCurrentDataElement({
+                                        ...currentDataElement,
+                                        type: value
+                                      })
+                                    }
+                                    disabled={currentDataElement.isDefault}
+                                  >
+                                    <SelectTrigger id="edit-element-type">
+                                      <SelectValue placeholder="Select type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Text">Text</SelectItem>
+                                      <SelectItem value="Number">Number</SelectItem>
+                                      <SelectItem value="Date">Date</SelectItem>
+                                      <SelectItem value="Currency">Currency</SelectItem>
+                                      <SelectItem value="Email">Email</SelectItem>
+                                      <SelectItem value="Phone">Phone Number</SelectItem>
+                                      <SelectItem value="Address">Address</SelectItem>
+                                      <SelectItem value="Name">Name</SelectItem>
+                                      <SelectItem value="SSN">SSN</SelectItem>
+                                      <SelectItem value="CreditCard">Credit Card</SelectItem>
+                                      <SelectItem value="Custom">Custom</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="edit-element-category">Category</Label>
+                                  <Select
+                                    value={currentDataElement.category}
+                                    onValueChange={(value: DataElementCategory) => 
+                                      setCurrentDataElement({
+                                        ...currentDataElement,
+                                        category: value
+                                      })
+                                    }
+                                    disabled={currentDataElement.isDefault}
+                                  >
+                                    <SelectTrigger id="edit-element-category">
+                                      <SelectValue placeholder="Select category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="General">General</SelectItem>
+                                      <SelectItem value="PII">PII</SelectItem>
+                                      <SelectItem value="Financial">Financial</SelectItem>
+                                      <SelectItem value="Medical">Medical</SelectItem>
+                                      <SelectItem value="Legal">Legal</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="edit-element-action">Action</Label>
+                                  <Select
+                                    value={currentDataElement.action}
+                                    onValueChange={(value: DataElementAction) => 
+                                      setCurrentDataElement({
+                                        ...currentDataElement,
+                                        action: value
+                                      })
+                                    }
+                                  >
+                                    <SelectTrigger id="edit-element-action">
+                                      <SelectValue placeholder="Select action" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Extract">Extract Only</SelectItem>
+                                      <SelectItem value="Redact">Redact Only</SelectItem>
+                                      <SelectItem value="ExtractAndRedact">Extract and Redact</SelectItem>
+                                      <SelectItem value="Ignore">Ignore</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {getActionDescription(currentDataElement.action)}
+                                  </p>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="edit-element-description">Description (Optional)</Label>
+                                  <Textarea
+                                    id="edit-element-description"
+                                    value={currentDataElement.description || ""}
+                                    onChange={(e) => setCurrentDataElement({
+                                      ...currentDataElement,
+                                      description: e.target.value
+                                    })}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Label htmlFor="edit-element-required">Required</Label>
+                                  <Switch
+                                    id="edit-element-required"
+                                    checked={!!currentDataElement.required}
+                                    onCheckedChange={(checked) => 
+                                      setCurrentDataElement({
+                                        ...currentDataElement,
+                                        required: checked
+                                      })
+                                    }
+                                  />
+                                  <span className="text-sm text-muted-foreground ml-1">
+                                    {currentDataElement.required ? 'Required' : 'Optional'}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                            <DialogFooter>
+                              <Button variant="outline" onClick={() => setEditElementOpen(false)}>Cancel</Button>
+                              <Button onClick={handleUpdateDataElement}>Save Changes</Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="training-data">
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <h4 className="font-medium">Classification Training</h4>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <ClassificationFeedbackStats 
+                              documentType={docType.name}
+                              onTrainClick={handleTrainWithFeedback}
+                            />
+                          </div>
+                          <div>
+                            <TrainingDatasetPanel />
+                          </div>
+                        </div>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
                 </TabsContent>
               ))}
             </Tabs>

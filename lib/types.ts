@@ -46,6 +46,7 @@ export interface DocumentData {
   confidence: number
   extractedText: string
   extractedFields: ExtractedField[]
+  classificationResult?: ClassificationResult | null
 }
 
 // Document configuration types
@@ -73,6 +74,8 @@ export interface DocumentTypeConfig {
   description?: string
   dataElements: DataElementConfig[]
   isActive: boolean
+  trainingDatasets?: TrainingDataset[]
+  defaultModelId?: string
 }
 
 export interface AppConfig {
@@ -91,5 +94,48 @@ export interface RedactionElement {
   pageIndex: number
   boundingBox?: AnyBoundingBox
   valueWordBlocks?: WordBlock[]
+}
+
+// Document classification types
+export interface ClassificationResult {
+  documentType: string
+  confidence: number
+  modelId?: string
+  classifierId?: string
+}
+
+export interface ClassificationFeedback {
+  id: string
+  documentId: string
+  originalClassification: ClassificationResult | null
+  correctedDocumentType: string | null
+  feedbackSource: 'auto' | 'manual' | 'review'
+  timestamp: number
+  hasBeenUsedForTraining: boolean
+}
+
+export interface TrainingExample {
+  id: string
+  documentType: string
+  fileKey: string
+  fileName: string
+  fileSize: number
+  mimeType: string
+  dateAdded: number
+  status: 'pending' | 'approved' | 'rejected' | 'used'
+  sourceFeedbackId?: string
+}
+
+export interface TrainingDataset {
+  id: string
+  documentTypeId: string
+  name: string
+  description?: string
+  examples: TrainingExample[]
+  modelId?: string
+  modelArn?: string
+  modelStatus?: 'TRAINING' | 'TRAINED' | 'FAILED' | 'DELETING' | 'IN_ERROR'
+  lastTrainedDate?: number
+  version?: number
 }
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { FileUploader } from "./file-uploader"
 import { DocumentViewer } from "./document-viewer"
 import { DataExtractor } from "./data-extractor"
@@ -15,10 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { processDocument } from "@/lib/document-processing"
+import { processDocument, classifyDocument, submitClassificationFeedback } from "@/lib/document-processing"
 import { redactDocument } from "@/lib/redaction"
-import type { DocumentData, DataElementConfig, DocumentTypeConfig, AnyBoundingBox, AwsBoundingBox } from "@/lib/types"
-import { Loader2, FileText, Settings, AlignLeft, AlertTriangle, Scissors, FileSearch, Wrench, Eraser } from "lucide-react"
+import type { DocumentData, DataElementConfig, DocumentTypeConfig, AnyBoundingBox, AwsBoundingBox, ClassificationResult } from "@/lib/types"
+import { Loader2, FileText, Settings, AlignLeft, AlertTriangle, Scissors, FileSearch, Wrench, Eraser, RefreshCw, FileUp, CheckIcon } from "lucide-react"
 import { useConfigStore } from "@/lib/config-store"
 import { useRouter } from "next/navigation"
 import { convertPdfToBase64 } from "../lib/pdf-utils"
@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useToast } from "@/components/ui/use-toast"
 import { toast } from "@/components/ui/use-toast"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 // Helper functions
 // Extended RedactionElement type to include properties we need
@@ -121,18 +122,10 @@ export function DocumentProcessor() {
   const [selectedElements, setSelectedElements] = useState<string[]>([])
   const [showAwsHelper, setShowAwsHelper] = useState(false)
   const [pdfViewerError, setPdfViewerError] = useState<string | null>(null)
-  const [documentClassification, setDocumentClassification] = useState<{
-    classes: Array<{name: string; score: number}>;
-    dominant: string;
-    sentiment?: string;
-    sentimentScores?: {
-      Positive?: number;
-      Negative?: number;
-      Neutral?: number;
-      Mixed?: number;
-    };
-    isLoading: boolean;
-  } | null>(null)
+  const [useAutoClassification, setUseAutoClassification] = useState(true)
+  const [isClassifying, setIsClassifying] = useState(false)
+  const [classificationResult, setClassificationResult] = useState<ClassificationResult | null>(null)
+  const [verificationOpen, setVerificationOpen] = useState(false)
   const [manualSelections, setManualSelections] = useState<Array<{
     id: string;
     label: string;
@@ -143,6 +136,7 @@ export function DocumentProcessor() {
       Height: number;
     };
   }>>([])
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
   const { toast } = useToast()
 
   // Preload PDF.js when the component mounts
@@ -188,11 +182,14 @@ export function DocumentProcessor() {
       return;
     }
     
+    // Set file state and reset other states
     setFile(uploadedFile);
     setImageUrl(null);
     setExtractedText("");
     setExtractedElements([]);
     setActiveTab("Document");
+    setClassificationResult(null);
+    setFeedbackSubmitted(false);
     
     // Generate a data URL to display the document
     const reader = new FileReader();
@@ -201,6 +198,22 @@ export function DocumentProcessor() {
       setImageUrl(dataUrl);
     };
     reader.readAsDataURL(uploadedFile);
+    
+    // Run auto-classification immediately if enabled
+    if (useAutoClassification) {
+      console.log("Auto-classification triggered for file:", uploadedFile.name);
+      // Small delay to ensure file state is fully set
+      setTimeout(async () => {
+        // Check if classification is already in progress
+        if (!isClassifying) {
+          try {
+            await handleClassifyDocument();
+          } catch (error) {
+            console.error("Auto-classification failed:", error);
+          }
+        }
+      }, 100);
+    }
     
     try {
       // For PDF documents, we should check if it's multipage
@@ -232,6 +245,14 @@ export function DocumentProcessor() {
       console.error('Error checking PDF page count:', error);
     }
   };
+
+  // Add a useEffect hook to trigger classification when file changes
+  useEffect(() => {
+    if (file && useAutoClassification) {
+      console.log("Auto-classification triggered for file:", file.name);
+      handleClassifyDocument();
+    }
+  }, [file, useAutoClassification]);
 
   // Handle manually reloading PDF.js after clearing cache
   const handleReloadPdfJs = async () => {
@@ -268,15 +289,7 @@ export function DocumentProcessor() {
       return;
     }
     
-    if (!activeDocType) {
-      toast({
-        title: "No document type selected",
-        description: "Please select a document type before processing.",
-        variant: "destructive"
-      });
-      return;
-    }
-
+    // Clear previous errors and states
     setIsProcessing(true);
     setProcessError(null);
     setShowAwsHelper(false);
@@ -296,107 +309,192 @@ export function DocumentProcessor() {
           // Continue with normal processing
         }
       }
-      
-      // Create form data for the file
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('documentType', activeDocType!.name);
-      
-      // Add extraction elements if configured
-      if (activeDocType!.dataElements) {
-        formData.append('elementsToExtract', 
-          JSON.stringify(activeDocType!.dataElements.map((e: any) => ({
-            id: e.id,
-            name: e.name,
-            type: e.type
-          })))
-        );
-      }
-      
-      // Process the document
-      const response = await fetch('/api/process-document', {
-        method: 'POST',
-        body: formData
-      });
-      
-      // Parse the response
-      const result = await response.json();
-      
-      // Check if we need page-by-page processing
-      if (response.status === 400 && result.requiresPageByPage) {
-        console.log('Server indicated this document requires page-by-page processing');
+
+      // If auto-classification is enabled and no document type is selected
+      if (useAutoClassification && !activeDocumentTypeId) {
+        try {
+          setIsClassifying(true);
+          setProcessingStatus('Classifying document...');
+          setProcessingProgress(20);
+          
+          // Attempt to classify the document
+          const result = await classifyDocument(file);
+          setClassificationResult(result);
+          
+          // Find the document type in our configuration
+          const matchingDocType = config.documentTypes.find(
+            dt => dt.name.toLowerCase() === result.documentType.toLowerCase()
+          );
+          
+          if (matchingDocType) {
+            // If high confidence (>80%), auto-select
+            if (result.confidence > 0.8) {
+              setActiveDocumentType(matchingDocType.id);
+              
+              // Submit feedback for high confidence classification
+              await submitClassificationFeedback(
+                file.name, // Using filename as document ID
+                result,
+                null, // No correction needed
+                'auto'
+              );
+              
+              // Continue with processing
+              await processWithDocType(matchingDocType);
+            } else {
+              // Lower confidence - request verification
+              setVerificationOpen(true);
+              setIsProcessing(false);
+              return;
+            }
+          } else {
+            // Document type not found in our configuration
+            toast({
+              title: "Unknown document type",
+              description: `The document was classified as "${result.documentType}" which is not configured in the system.`,
+              variant: "destructive"
+            });
+            
+            // Keep processing state active but show the document type selector
+            setIsClassifying(false);
+            setIsProcessing(false);
+          }
+        } catch (error) {
+          console.error("Classification error:", error);
+          toast({
+            title: "Classification failed",
+            description: "Could not automatically classify document. Please select the document type manually.",
+            variant: "destructive"
+          });
+          setIsClassifying(false);
+          setIsProcessing(false);
+          return;
+        }
+      } else if (activeDocumentTypeId) {
+        // If document type is already selected, use it
+        const docType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId);
+        if (docType) {
+          await processWithDocType(docType);
+        } else {
+          throw new Error("Selected document type not found");
+        }
+      } else {
+        // No document type selected and auto-classification disabled
         toast({
-          title: "Page by page processing required",
-          description: result.message || "This document requires page-by-page processing for best results.",
-          duration: 5000
+          title: "No document type selected",
+          description: "Please select a document type before processing.",
+          variant: "destructive"
         });
-        handleProcessPageByPage();
+        setIsProcessing(false);
         return;
       }
-      
-      if (!response.ok) {
-        throw new Error(result.error || `Error ${response.status}: ${response.statusText}`);
-      }
-      
-      // Update the state with the processed data
-      setExtractedText(result.extractedText || '');
-      
-      // Convert the fields to the expected format if necessary
-      if (result.extractedFields && Array.isArray(result.extractedFields)) {
-        setExtractedElements(
-          result.extractedFields.map((field: any) => ({
-            id: field.id || `field-${Math.random().toString(36).substring(2, 11)}`,
-            text: field.value || field.text || '',
-            label: field.label || '',
-            confidence: field.confidence || 0,
-            boundingBox: field.boundingBox || null,
-            pageIndex: field.pageIndex || 0
-          }))
-        );
-      }
-      
-      // Run pattern detection on the extracted text
-      if (result.extractedText) {
-        const patternElements = detectPatterns(result.extractedText);
-        if (patternElements.length > 0) {
-          // Add pattern-detected elements
-          setExtractedElements(prev => [...prev, ...patternElements]);
-          
-          toast({
-            title: "Pattern Detection",
-            description: `Found ${patternElements.length} additional elements using pattern matching`,
-            variant: "default"
-          });
-        }
-      }
-      
-      // Move to the next step
-      setActiveTab("Results");
-      
     } catch (error) {
       console.error('Error processing document:', error);
-      
-      // Get the error message
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // Check for special cases
-      if (errorMessage.includes('requires page-by-page processing')) {
-        handleProcessPageByPage();
-        return;
-      }
-      
-      setProcessError(errorMessage);
-      
-      // Check if this is an AWS configuration error
-      if (
-        errorMessage.includes('AWS') || 
-        errorMessage.includes('credentials') || 
-        errorMessage.includes('access key')
-      ) {
-        setShowAwsHelper(true);
-      }
-    } finally {
+      setProcessError(`Error: ${(error as Error).message}`);
       setIsProcessing(false);
+    }
+  };
+  
+  // Function to process document with a specific document type
+  const processWithDocType = async (docType: DocumentTypeConfig) => {
+    try {
+      setProcessingStatus('Processing document...');
+      setProcessingProgress(50);
+      
+      // Process the document using our processDocument function from lib/document-processing
+      const data = await processDocument(
+        file!,
+        {
+          documentType: docType.name,
+          elementsToExtract: docType.dataElements.map(e => ({
+            id: e.id,
+            name: e.name,
+            type: e.type,
+            required: e.required
+          }))
+        },
+        false // Don't use classification again since we already did it
+      );
+      
+      // Handle the processed data
+      setDocumentData(data);
+      setActiveTab("extracted");
+      
+      // Convert fields to elements for redaction if needed
+      if (data.extractedFields && data.extractedFields.length > 0) {
+        const elements = data.extractedFields.map(field => ({
+          id: field.id,
+          label: field.label,
+          text: field.value || '',
+          type: field.dataType,
+          value: field.value,
+          confidence: field.confidence,
+          boundingBox: field.boundingBox,
+          pageIndex: 0
+        } as RedactionElement));
+        setExtractedElements(elements);
+      }
+      
+      toast({
+        title: "Document processed successfully",
+        description: `Extracted ${data.extractedFields?.length || 0} fields`,
+        variant: "default"
+      });
+      
+      setIsProcessing(false);
+      setIsClassifying(false);
+      setProcessingProgress(100);
+    } catch (error) {
+      console.error('Error in document processing:', error);
+      setProcessError(`Error: ${(error as Error).message}`);
+      setIsProcessing(false);
+      setIsClassifying(false);
+    }
+  };
+
+  // Handle classification verification
+  const handleVerification = async (verified: boolean, correctedTypeId?: string) => {
+    if (!file || !classificationResult) return;
+    
+    try {
+      setIsProcessing(true);
+      
+      // Get the correct document type
+      let docTypeId = verified ? 
+        // Find the matching doc type ID if verified
+        config.documentTypes.find(dt => dt.name.toLowerCase() === classificationResult.documentType.toLowerCase())?.id : 
+        // Use the corrected type if not verified
+        correctedTypeId;
+        
+      if (!docTypeId) {
+        throw new Error("Could not determine document type");
+      }
+      
+      // Update active document type
+      setActiveDocumentType(docTypeId);
+      
+      // Get the docType object
+      const docType = config.documentTypes.find(dt => dt.id === docTypeId);
+      if (!docType) {
+        throw new Error("Document type not found");
+      }
+      
+      // Submit feedback
+      await submitClassificationFeedback(
+        file.name, // Using filename as document ID
+        classificationResult,
+        verified ? null : docType.name,
+        'manual'
+      );
+      
+      // Process the document
+      await processWithDocType(docType);
+    } catch (error) {
+      console.error("Verification error:", error);
+      setProcessError(`Error: ${(error as Error).message}`);
+      setIsProcessing(false);
+    } finally {
+      setVerificationOpen(false);
     }
   };
 
@@ -853,11 +951,8 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
     if (!file) return;
     
     // Set loading state
-    setDocumentClassification({
-      classes: [],
-      dominant: "",
-      isLoading: true
-    });
+    setIsClassifying(true);
+    setFeedbackSubmitted(false);
     
     try {
       // Create form data
@@ -878,65 +973,29 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
       const data = await response.json();
       
       // Update state with classification results
-      setDocumentClassification({
-        classes: data.classes,
-        dominant: data.dominant,
-        sentiment: data.sentiment,
-        sentimentScores: data.sentimentScores,
-        isLoading: false
+      setClassificationResult({
+        documentType: data.documentType || "Unknown",
+        confidence: data.confidence || 0.5,
+        modelId: data.modelId,
+        classifierId: data.classifierId
       });
       
       // Show success toast
       toast({
-        title: "Document Classified",
-        description: `Identified as: ${data.dominant}`,
+        title: "Document classified",
+        description: `Classified as: ${data.documentType || "Unknown"}`,
         variant: "default"
       });
       
-      // If we have a matching document type in our config, select it automatically
-      if (data.dominant) {
-        const matchingDocType = config.documentTypes.find(
-          dt => dt.name.toLowerCase() === data.dominant.toLowerCase()
-        );
-        
-        if (matchingDocType) {
-          setActiveDocumentType(matchingDocType.id);
-          toast({
-            title: "Document Type Set",
-            description: `Automatically selected ${matchingDocType.name}`,
-            variant: "default"
-          });
-        }
-      }
     } catch (error) {
       console.error('Error classifying document:', error);
-      
-      // Reset loading state but keep any previous results
-      setDocumentClassification(prev => prev 
-        ? { ...prev, isLoading: false } 
-        : { classes: [], dominant: "", isLoading: false });
-      
-      const errorMessage = error instanceof Error ? error.message : "Failed to classify document";
-      
-      // Check if this is an AWS permissions error
-      if (errorMessage.includes('AccessDeniedException') || 
-          errorMessage.includes('not authorized to perform: comprehend:') || 
-          errorMessage.includes('AWS configuration')) {
-        setProcessError('AWS Comprehend permissions are required for document classification. Please update your IAM policy.');
-        setShowAwsHelper(true);
-        
-        toast({
-          title: "AWS Permissions Error",
-          description: "Your AWS user needs Comprehend permissions. See instructions below.",
-          variant: "destructive"
-        });
-      } else {
-        toast({
-          title: "Classification Error",
-          description: errorMessage,
-          variant: "destructive"
-        });
-      }
+      toast({
+        title: "Classification failed",
+        description: (error as Error).message || "An error occurred while classifying the document.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsClassifying(false);
     }
   };
 
@@ -1161,37 +1220,142 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
             </div>
             
             <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">
-                  Document Type
-                </label>
-                <Select
-                  value={activeDocumentTypeId || ''}
-                  onValueChange={(value) => setActiveDocumentType(value)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select document type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableDocTypes.length === 0 ? (
-                      <SelectItem value="none" disabled>
-                        No document types available
-                      </SelectItem>
-                    ) : (
-                      availableDocTypes.map((docType) => (
-                        <SelectItem key={docType.id} value={docType.id}>
-                          {docType.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-                {activeDocType && activeDocType.description && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {activeDocType.description}
-                  </p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="auto-classify" 
+                    checked={useAutoClassification}
+                    onCheckedChange={(checked) => setUseAutoClassification(!!checked)}
+                  />
+                  <label 
+                    htmlFor="auto-classify" 
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    Auto-classify documents
+                  </label>
+                </div>
+                {classificationResult && (
+                  <Badge variant="outline" className="ml-auto">
+                    Classified: {classificationResult.documentType} 
+                    ({Math.round(classificationResult.confidence * 100)}%)
+                  </Badge>
                 )}
               </div>
+              
+              {(!useAutoClassification || (classificationResult && classificationResult.confidence < 0.8)) && (
+                <div>
+                  <label className="text-sm font-medium mb-1 block">
+                    Document Type
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <Select
+                        value={activeDocumentTypeId || ''}
+                        onValueChange={(value) => setActiveDocumentType(value)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select document type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableDocTypes.length === 0 ? (
+                            <SelectItem value="none" disabled>
+                              No document types available
+                            </SelectItem>
+                          ) : (
+                            availableDocTypes.map((docType) => (
+                              <SelectItem key={docType.id} value={docType.id}>
+                                {docType.name}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {classificationResult && activeDocumentTypeId && (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={async () => {
+                          try {
+                            // Show processing state
+                            toast({
+                              title: "Submitting feedback...",
+                              description: "Please wait while we process your feedback.",
+                              variant: "default"
+                            });
+                            
+                            const selectedDocType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId);
+                            if (!selectedDocType) {
+                              throw new Error("Selected document type not found");
+                            }
+                            
+                            // Log what we're about to send for easier debugging
+                            console.log("Submitting classification feedback:", {
+                              documentId: file?.name || 'unknown-document',
+                              originalClassification: classificationResult,
+                              correctedDocumentType: selectedDocType.name,
+                              feedbackSource: 'manual'
+                            });
+                            
+                            const response = await fetch('/api/classification-feedback', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                documentId: file?.name || 'unknown-document',
+                                originalClassification: classificationResult,
+                                correctedDocumentType: selectedDocType.name,
+                                feedbackSource: 'manual',
+                                timestamp: Date.now()
+                              })
+                            });
+                            
+                            if (!response.ok) {
+                              const errorData = await response.json();
+                              throw new Error(errorData.error || `HTTP error ${response.status}`);
+                            }
+                            
+                            const data = await response.json();
+                            console.log("Feedback API response:", data);
+                            
+                            setFeedbackSubmitted(true);
+                            
+                            toast({
+                              title: "Feedback submitted",
+                              description: `This will help improve classification for future documents.`,
+                              variant: "default"
+                            });
+                          } catch (error) {
+                            console.error('Error submitting feedback:', error);
+                            toast({
+                              title: "Feedback submission failed",
+                              description: (error as Error).message || "An error occurred while submitting feedback.",
+                              variant: "destructive"
+                            });
+                          }
+                        }}
+                        disabled={feedbackSubmitted}
+                      >
+                        {feedbackSubmitted ? (
+                          <>
+                            <CheckIcon className="h-4 w-4 mr-1" />
+                            Feedback Sent
+                          </>
+                        ) : (
+                          "Submit Feedback"
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                  {activeDocType && activeDocType.description && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {activeDocType.description}
+                    </p>
+                  )}
+                </div>
+              )}
               
               <FileUploader onFileUpload={handleFileUpload} isProcessing={isUploading} file={file} />
             </div>
@@ -1497,38 +1661,28 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
               )}
               
               {/* Classification results, if available */}
-              {documentClassification && !documentClassification.isLoading && (
+              {classificationResult && (
                 <div className="mb-4 p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm">
                   <p className="font-medium">Document Classification</p>
                   
-                  {/* Entity types */}
                   <p className="mt-1">
-                    <span className="font-semibold">Primary Entity Type:</span> {documentClassification.dominant}
+                    <span className="font-semibold">Document Type:</span> {classificationResult.documentType}
                   </p>
                   
-                  {/* Sentiment analysis if available */}
-                  {documentClassification.sentiment && (
-                    <p className="mt-1">
-                      <span className="font-semibold">Sentiment:</span> {documentClassification.sentiment}
-                      {documentClassification.sentimentScores && (
-                        <span className="text-xs ml-2">
-                          ({Math.round((documentClassification.sentimentScores?.Positive || 0) * 100)}% positive)
-                        </span>
-                      )}
+                  <p className="mt-1">
+                    <span className="font-semibold">Confidence:</span> {(classificationResult.confidence * 100).toFixed(1)}%
+                  </p>
+                  
+                  {classificationResult.modelId && (
+                    <p className="mt-1 text-xs">
+                      <span className="font-semibold">Model ID:</span> {classificationResult.modelId}
                     </p>
                   )}
                   
-                  <div className="mt-2 text-xs">
-                    <p className="font-medium mb-1">Entity types found:</p>
-                    <ul className="space-y-1">
-                      {documentClassification.classes.map(c => (
-                        <li key={c.name} className="flex justify-between">
-                          <span>{c.name}</span>
-                          <span>{(c.score * 100).toFixed(1)}%</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <p className="mt-3 text-xs italic border-t border-blue-200 pt-2">
+                    If this classification is incorrect, select the correct document type and click "Submit Feedback"
+                    to help improve future classifications.
+                  </p>
                 </div>
               )}
               
@@ -1562,14 +1716,14 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 
                 <Button 
                   onClick={handleClassifyDocument}
-                  disabled={isProcessing || !file || documentClassification?.isLoading}
+                  disabled={isProcessing || !file || isClassifying}
                   className="w-full flex justify-start items-center"
                   variant="outline"
                   size="lg"
                 >
-                  <Loader2 className={`mr-3 h-5 w-5 ${documentClassification?.isLoading ? 'animate-spin' : ''}`} />
+                  <Loader2 className={`mr-3 h-5 w-5 ${isClassifying ? 'animate-spin' : ''}`} />
                   <div className="text-left">
-                    <div>{documentClassification?.isLoading ? 'Classifying...' : 'Classify Document'}</div>
+                    <div>{isClassifying ? 'Classifying...' : 'Classify Document'}</div>
                     <div className="text-xs font-normal opacity-80">Analyze document type with AWS Comprehend</div>
                   </div>
                 </Button>
@@ -1609,39 +1763,24 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
             <Card className="p-4 border border-muted-foreground/20">
               <h2 className="text-lg font-semibold mb-3">Document Processing Options</h2>
               
-              {/* Classification results, if available */}
-              {documentClassification && !documentClassification.isLoading && (
+              {/* Replace classification results section */}
+              {classificationResult && (
                 <div className="mb-4 p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm">
                   <p className="font-medium">Document Classification</p>
                   
-                  {/* Entity types */}
                   <p className="mt-1">
-                    <span className="font-semibold">Primary Entity Type:</span> {documentClassification.dominant}
+                    <span className="font-semibold">Document Type:</span> {classificationResult.documentType}
                   </p>
                   
-                  {/* Sentiment analysis if available */}
-                  {documentClassification.sentiment && (
-                    <p className="mt-1">
-                      <span className="font-semibold">Sentiment:</span> {documentClassification.sentiment}
-                      {documentClassification.sentimentScores && (
-                        <span className="text-xs ml-2">
-                          ({Math.round((documentClassification.sentimentScores?.Positive || 0) * 100)}% positive)
-                        </span>
-                      )}
+                  <p className="mt-1">
+                    <span className="font-semibold">Confidence:</span> {(classificationResult.confidence * 100).toFixed(1)}%
+                  </p>
+                  
+                  {classificationResult.modelId && (
+                    <p className="mt-1 text-xs">
+                      <span className="font-semibold">Model ID:</span> {classificationResult.modelId}
                     </p>
                   )}
-                  
-                  <div className="mt-2 text-xs">
-                    <p className="font-medium mb-1">Entity types found:</p>
-                    <ul className="space-y-1">
-                      {documentClassification.classes.map(c => (
-                        <li key={c.name} className="flex justify-between">
-                          <span>{c.name}</span>
-                          <span>{(c.score * 100).toFixed(1)}%</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
                 </div>
               )}
               
@@ -1661,14 +1800,14 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 
                 <Button 
                   onClick={handleClassifyDocument}
-                  disabled={isProcessing || !file || documentClassification?.isLoading}
+                  disabled={isProcessing || !file || isClassifying}
                   className="w-full flex justify-start items-center"
                   variant="outline"
                   size="lg"
                 >
-                  <Loader2 className={`mr-3 h-5 w-5 ${documentClassification?.isLoading ? 'animate-spin' : ''}`} />
+                  <Loader2 className={`mr-3 h-5 w-5 ${isClassifying ? 'animate-spin' : ''}`} />
                   <div className="text-left">
-                    <div>{documentClassification?.isLoading ? 'Classifying...' : 'Classify Document'}</div>
+                    <div>{isClassifying ? 'Classifying...' : 'Classify Document'}</div>
                     <div className="text-xs font-normal opacity-80">Analyze document type with AWS Comprehend</div>
                   </div>
                 </Button>
@@ -1897,6 +2036,70 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
           )}
         </div>
       </div>
+
+      <Dialog open={verificationOpen} onOpenChange={setVerificationOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verify Document Classification</DialogTitle>
+            <DialogDescription>
+              Please verify if the automatic classification is correct.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Classification Result:</p>
+              <div className="p-3 border rounded-md bg-muted/30">
+                <p><strong>Document Type:</strong> {classificationResult?.documentType}</p>
+                {classificationResult && (
+                  <p><strong>Confidence:</strong> {(classificationResult.confidence * 100).toFixed(1)}%</p>
+                )}
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Is this classification correct?</p>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={() => handleVerification(true)} 
+                  className="flex-1"
+                >
+                  Yes, it's correct
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setVerificationOpen(true)} 
+                  className="flex-1"
+                >
+                  No, select correct type
+                </Button>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Or select the correct document type:</p>
+              <Select onValueChange={(value) => handleVerification(false, value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select document type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableDocTypes.map((docType) => (
+                    <SelectItem key={docType.id} value={docType.id}>
+                      {docType.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVerificationOpen(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

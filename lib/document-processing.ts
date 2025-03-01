@@ -1,4 +1,4 @@
-import type { DocumentData, ExtractedField, DataElementConfig } from "./types"
+import type { DocumentData, ExtractedField, DataElementConfig, ClassificationResult } from "./types"
 import { extractTextFallback } from "./text-extraction"
 
 interface ProcessOptions {
@@ -11,7 +11,118 @@ interface ProcessOptions {
   }>
 }
 
-export async function processDocument(file: File, options?: ProcessOptions): Promise<DocumentData> {
+// New function to classify a document
+export async function classifyDocument(file: File): Promise<ClassificationResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  
+  try {
+    console.log("Calling the document classification endpoint...");
+    const res = await fetch("/api/classify-document", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      console.error("Classification API error response:", errorData);
+      throw new Error(errorData.error || "Document classification failed");
+    }
+
+    const data = await res.json();
+    console.log("Classification API success response:", data);
+    
+    return {
+      documentType: data.documentType,
+      confidence: data.confidence,
+      modelId: data.modelId,
+      classifierId: data.classifierId
+    };
+  } catch (error) {
+    console.error("Document classification error:", error);
+    throw error;
+  }
+}
+
+// Function to submit classification feedback
+export async function submitClassificationFeedback(
+  documentId: string,
+  originalClassification: ClassificationResult | null,
+  correctedDocumentType: string | null,
+  feedbackSource: 'auto' | 'manual' | 'review' = 'manual'
+): Promise<void> {
+  try {
+    console.log("Submitting classification feedback...");
+    const res = await fetch("/api/classification-feedback", {
+      method: "POST",
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        documentId,
+        originalClassification,
+        correctedDocumentType,
+        feedbackSource,
+        timestamp: Date.now()
+      }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      console.error("Feedback API error response:", errorData);
+      throw new Error(errorData.error || "Failed to submit classification feedback");
+    }
+
+    console.log("Feedback submitted successfully");
+  } catch (error) {
+    console.error("Error submitting classification feedback:", error);
+    throw error;
+  }
+}
+
+// Modified to optionally use classification first
+export async function processDocument(
+  file: File, 
+  options?: ProcessOptions,
+  useClassification: boolean = false
+): Promise<DocumentData> {
+  let classificationResult: ClassificationResult | null = null;
+  
+  // If we should use classification and no document type is provided
+  if (useClassification && (!options || !options.documentType)) {
+    try {
+      // Attempt to classify the document
+      classificationResult = await classifyDocument(file);
+      
+      // Create or update options with the classified document type
+      if (!options) {
+        options = {
+          documentType: classificationResult.documentType,
+          elementsToExtract: []  // Will use default elements
+        };
+      } else {
+        options = {
+          ...options,
+          documentType: classificationResult.documentType
+        };
+      }
+      
+      // Auto-feedback for high confidence classifications
+      if (classificationResult.confidence > 0.9) {
+        await submitClassificationFeedback(
+          file.name, // Using filename as a simple document ID
+          classificationResult,
+          null, // No correction needed
+          'auto'
+        );
+      }
+    } catch (error) {
+      console.error("Classification failed, proceeding with manual document type:", error);
+      // Continue with whatever options we have
+    }
+  }
+  
+  // Original document processing logic
   const formData = new FormData();
   formData.append("file", file);
 
@@ -50,7 +161,8 @@ export async function processDocument(file: File, options?: ProcessOptions): Pro
       documentType: data.documentType || (options ? options.documentType : "Unknown"),
       confidence: data.confidence || 0,
       extractedText: data.extractedText || "",
-      extractedFields: data.extractedFields || []
+      extractedFields: data.extractedFields || [],
+      classificationResult
     };
   } catch (error) {
     console.error("Document processing error:", error);
