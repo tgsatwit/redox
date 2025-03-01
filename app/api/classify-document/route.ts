@@ -136,11 +136,11 @@ export async function POST(request: Request) {
       const fileHash = crypto.createHash('md5').update(Buffer.from(fileBytes)).digest('hex');
       s3Key = `temp-docs/${fileHash}-${uploadedFile.name}`;
       // Handle possibly undefined environment variables
-      const envBucketName = process.env.AWS_BUCKET_NAME || process.env.AWS_S3_BUCKET || null;
+      const envBucketName = process.env.AWS_S3_BUCKET || null;
       bucketName = envBucketName;
       
       if (!bucketName) {
-        throw new Error('AWS_BUCKET_NAME or AWS_S3_BUCKET environment variable is not set');
+        throw new Error('AWS_S3_BUCKET environment variable is not set');
       }
 
       // Upload file to S3

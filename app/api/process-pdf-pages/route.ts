@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { TextractClient, DetectDocumentTextCommand } from '@aws-sdk/client-textract';
 import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import * as os from 'os';
@@ -9,28 +10,30 @@ const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
 const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 // Check for both possible bucket name variables
-const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || process.env.S3_BUCKET_NAME;
+const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET;
 
 // Validate required environment variables
 const missingEnvVars: string[] = [];
 if (!AWS_ACCESS_KEY_ID) missingEnvVars.push('AWS_ACCESS_KEY_ID');
 if (!AWS_SECRET_ACCESS_KEY) missingEnvVars.push('AWS_SECRET_ACCESS_KEY');
-if (!AWS_S3_BUCKET) missingEnvVars.push('AWS_S3_BUCKET or S3_BUCKET_NAME');
+if (!AWS_S3_BUCKET) missingEnvVars.push('AWS_S3_BUCKET');
 
-// Initialize AWS SDK only if we have the required credentials
-let s3: AWS.S3 | null = null;
-let textract: AWS.Textract | null = null;
+// Initialize AWS SDK clients only if we have the required credentials
+let s3Client: S3Client | null = null;
+let textractClient: TextractClient | null = null;
 
 if (missingEnvVars.length === 0) {
-  // Initialize AWS SDK
-  AWS.config.update({
-    accessKeyId: AWS_ACCESS_KEY_ID,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY,
-    region: AWS_REGION
-  });
+  // Initialize AWS SDK clients
+  const clientConfig = {
+    region: AWS_REGION,
+    credentials: {
+      accessKeyId: AWS_ACCESS_KEY_ID!,
+      secretAccessKey: AWS_SECRET_ACCESS_KEY!
+    }
+  };
 
-  s3 = new AWS.S3();
-  textract = new AWS.Textract();
+  s3Client = new S3Client(clientConfig);
+  textractClient = new TextractClient(clientConfig);
 }
 
 /**
@@ -52,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Ensure AWS services are initialized
-    if (!s3 || !textract) {
+    if (!s3Client || !textractClient) {
       return NextResponse.json(
         { error: 'AWS services not properly initialized' },
         { status: 500 }
@@ -104,19 +107,19 @@ export async function POST(request: NextRequest) {
       const uploadKey = `uploads/${Date.now()}-${pageFile.name}`;
       console.log(`Attempting to upload to S3 bucket: ${AWS_S3_BUCKET}`);
       
-      await s3.putObject({
+      await s3Client.send(new PutObjectCommand({
         Bucket: AWS_S3_BUCKET!,
         Key: uploadKey,
         Body: buffer,
         ContentType: contentType
-      }).promise();
+      }));
       console.log(`Uploaded file to S3: ${uploadKey} with content type: ${contentType}`);
       
       // Verify the upload worked
-      const headResult = await s3.headObject({
+      const headResult = await s3Client.send(new HeadObjectCommand({
         Bucket: AWS_S3_BUCKET!,
         Key: uploadKey
-      }).promise();
+      }));
       console.log('S3 head object result:', headResult);
       
       // Use Textract to detect text in the image
@@ -132,15 +135,35 @@ export async function POST(request: NextRequest) {
       
       console.log('Calling textract.detectDocumentText with image page...');
       
-      const textractResponse = await textract.detectDocumentText(detectParams).promise();
+      const textractResponse = await textractClient.send(
+        new DetectDocumentTextCommand(detectParams)
+      );
       
       // Process the textract response to extract text and bounding boxes
       const blocks = textractResponse.Blocks || [];
       
+      // Define the type for Textract blocks
+      interface TextractBlock {
+        BlockType?: string;
+        Text?: string;
+        Id?: string;
+        Geometry?: {
+          BoundingBox?: {
+            Width?: number;
+            Height?: number;
+            Left?: number;
+            Top?: number;
+          };
+        };
+        Confidence?: number;
+      }
+      
       // Extract text content
-      const textBlocks = blocks.filter(block => block.BlockType === 'LINE' || block.BlockType === 'WORD');
+      const textBlocks = blocks.filter((block: TextractBlock) => 
+        block.BlockType === 'LINE' || block.BlockType === 'WORD'
+      );
       const extractedText = textBlocks
-        .map(block => block.Text)
+        .map((block: TextractBlock) => block.Text)
         .filter(Boolean)
         .join(' ');
       
@@ -148,7 +171,7 @@ export async function POST(request: NextRequest) {
       const extractedFields = [];
       const pageNumber = parseInt(pageIndex) + 1;
       
-      for (const block of blocks) {
+      for (const block of blocks as TextractBlock[]) {
         if (block.BlockType === 'LINE' && block.Text && block.Geometry?.BoundingBox) {
           extractedFields.push({
             id: `page-${pageNumber}-${block.Id}`,

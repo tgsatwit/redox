@@ -465,47 +465,6 @@ export function DocumentViewer({
   // Check if the extracted text might be an error message
   const isErrorText = extractedText && (extractedText.startsWith('Error:') || extractedText.toLowerCase().includes('cannot be processed'))
   
-  // Add this function for template application
-  const applyRedactionTemplate = useCallback((templateType: 'passport' | 'driverLicense') => {
-    if (!containerRef.current || !onSelectionAdded) return
-    
-    const containerRect = containerRef.current.getBoundingClientRect()
-    const containerWidth = containerRect.width
-    const containerHeight = containerRect.height
-    
-    // Define templates with relative positioning (percentages)
-    const templates = {
-      passport: [
-        { label: 'Passport Number', Left: 0.7, Top: 0.05, Width: 0.25, Height: 0.05 },
-        { label: 'Date of Birth', Left: 0.7, Top: 0.15, Width: 0.25, Height: 0.05 },
-        { label: 'Name', Left: 0.3, Top: 0.25, Width: 0.4, Height: 0.05 },
-        { label: 'MRZ Line 1', Left: 0.1, Top: 0.85, Width: 0.8, Height: 0.05 },
-        { label: 'MRZ Line 2', Left: 0.1, Top: 0.92, Width: 0.8, Height: 0.05 }
-      ],
-      driverLicense: [
-        { label: 'License Number', Left: 0.65, Top: 0.3, Width: 0.3, Height: 0.05 },
-        { label: 'Name', Left: 0.3, Top: 0.2, Width: 0.4, Height: 0.05 },
-        { label: 'Address', Left: 0.3, Top: 0.4, Width: 0.6, Height: 0.1 },
-        { label: 'Date of Birth', Left: 0.3, Top: 0.55, Width: 0.3, Height: 0.05 },
-        { label: 'Issue/Expiry Date', Left: 0.6, Top: 0.55, Width: 0.3, Height: 0.05 }
-      ]
-    }
-    
-    // Apply the selected template
-    templates[templateType].forEach(template => {
-      onSelectionAdded({
-        id: `template-${templateType}-${template.label}-${Date.now()}`,
-        label: template.label,
-        boundingBox: {
-          Left: template.Left,
-          Top: template.Top,
-          Width: template.Width,
-          Height: template.Height
-        }
-      })
-    })
-  }, [onSelectionAdded, containerRef])
-  
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -544,28 +503,6 @@ export function DocumentViewer({
           >
             <Scissors className="h-4 w-4" />
           </Button>
-          
-          {/* Add template buttons */}
-          {onSelectionAdded && (
-            <>
-              <Button 
-                variant="outline" 
-                size="icon" 
-                onClick={() => applyRedactionTemplate('passport')}
-                title="Apply Passport Template"
-              >
-                <FileSearch className="h-4 w-4" />
-              </Button>
-              <Button 
-                variant="outline" 
-                size="icon" 
-                onClick={() => applyRedactionTemplate('driverLicense')}
-                title="Apply Driver's License Template"
-              >
-                <FileSearch className="h-4 w-4" />
-              </Button>
-            </>
-          )}
           
           {isPdf && pdfDocument && pdfTotalPages > 1 && (
             <div className="flex items-center gap-1">

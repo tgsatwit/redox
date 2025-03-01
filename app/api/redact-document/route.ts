@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       // Upload the PDF to S3
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: process.env.AWS_BUCKET_NAME,
+          Bucket: process.env.AWS_S3_BUCKET,
           Key: key,
           Body: fileBytes,
           ContentType: "application/pdf",
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     // Upload the redacted image to S3
     await s3Client.send(
       new PutObjectCommand({
-        Bucket: process.env.AWS_BUCKET_NAME,
+        Bucket: process.env.AWS_S3_BUCKET,
         Key: key,
         Body: processedImage,
         ContentType: "image/png",

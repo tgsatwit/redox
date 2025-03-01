@@ -1,0 +1,48 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:ListTables"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-config",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-doctypes",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-subtypes",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-subtypes/index/documentTypeId-index",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/documentId-index",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/timestamp-index"
+      ]
+    }
+  ]
+} 

@@ -1,25 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { TextractClient, DetectDocumentTextCommand } from '@aws-sdk/client-textract';
 import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import * as os from 'os';
 
-// Initialize AWS SDK
-AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION || 'us-east-1'
-});
+// Setup AWS SDK clients
+const region = process.env.AWS_REGION || 'us-east-1';
+const clientConfig = {
+  region,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+  }
+};
 
-const s3 = new AWS.S3();
-const textract = new AWS.Textract();
+const s3Client = new S3Client(clientConfig);
+const textractClient = new TextractClient(clientConfig);
 
 // Get the S3 bucket name from environment variables
-const bucketName = process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+const bucketName = process.env.AWS_S3_BUCKET;
 
 // Validate required environment variables
 if (!bucketName) {
-  console.error('Missing required environment variable: S3_BUCKET_NAME');
+  console.error('Missing required environment variable: AWS_S3_BUCKET');
 }
 
 /**
@@ -67,12 +71,12 @@ export async function POST(request: NextRequest) {
     
     // Upload to S3 for Textract processing
     const uploadKey = `test-uploads/${Date.now()}-${imageFile.name}`;
-    await s3.putObject({
+    await s3Client.send(new PutObjectCommand({
       Bucket: bucketName!,
       Key: uploadKey,
       Body: buffer,
       ContentType: contentType
-    }).promise();
+    }));
     console.log(`Uploaded file to S3: ${uploadKey}`);
     
     // Use Textract to detect text in the image
@@ -86,15 +90,35 @@ export async function POST(request: NextRequest) {
     };
     
     console.log('Calling textract.detectDocumentText with image...');
-    const textractResponse = await textract.detectDocumentText(detectParams).promise();
+    const textractResponse = await textractClient.send(
+      new DetectDocumentTextCommand(detectParams)
+    );
     
     // Process the textract response
     const blocks = textractResponse.Blocks || [];
     
+    // Define the type for Textract blocks
+    interface TextractBlock {
+      BlockType?: string;
+      Text?: string;
+      Id?: string;
+      Geometry?: {
+        BoundingBox?: {
+          Width?: number;
+          Height?: number;
+          Left?: number;
+          Top?: number;
+        };
+      };
+      Confidence?: number;
+    }
+    
     // Extract text content
-    const textBlocks = blocks.filter(block => block.BlockType === 'LINE' || block.BlockType === 'WORD');
+    const textBlocks = blocks.filter((block: TextractBlock) => 
+      block.BlockType === 'LINE' || block.BlockType === 'WORD'
+    );
     const extractedText = textBlocks
-      .map(block => block.Text)
+      .map((block: TextractBlock) => block.Text)
       .filter(Boolean)
       .join(' ');
     

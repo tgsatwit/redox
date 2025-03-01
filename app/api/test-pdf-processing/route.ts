@@ -1,26 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { TextractClient, DetectDocumentTextCommand } from '@aws-sdk/client-textract';
 import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import * as os from 'os';
 import { PDFDocument } from 'pdf-lib';
 
-// Initialize AWS SDK
-AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION || 'us-east-1'
-});
+// Setup AWS SDK clients
+const region = process.env.AWS_REGION || 'us-east-1';
+const clientConfig = {
+  region,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+  }
+};
 
-const s3 = new AWS.S3();
-const textract = new AWS.Textract();
+const s3Client = new S3Client(clientConfig);
+const textractClient = new TextractClient(clientConfig);
 
 // Get the S3 bucket name from environment variables
-const bucketName = process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+const bucketName = process.env.AWS_S3_BUCKET;
 
 // Validate required environment variables
 if (!bucketName) {
-  console.error('Missing required environment variable: S3_BUCKET_NAME');
+  console.error('Missing required environment variable: AWS_S3_BUCKET');
+}
+
+// Define the type for Textract blocks
+interface TextractBlock {
+  BlockType?: string;
+  Text?: string;
+  Id?: string;
+  Geometry?: {
+    BoundingBox?: {
+      Width?: number;
+      Height?: number;
+      Left?: number;
+      Top?: number;
+    };
+  };
+  Confidence?: number;
 }
 
 /**
@@ -91,12 +111,12 @@ export async function POST(request: NextRequest) {
       
       // Upload to S3 for Textract processing
       const uploadKey = `test-uploads/${Date.now()}-${pdfFile.name}`;
-      await s3.putObject({
+      await s3Client.send(new PutObjectCommand({
         Bucket: bucketName!,
         Key: uploadKey,
         Body: buffer,
         ContentType: 'application/pdf'
-      }).promise();
+      }));
       console.log(`Uploaded PDF to S3: ${uploadKey}`);
       
       // Try to use Textract directly on the PDF
@@ -110,7 +130,9 @@ export async function POST(request: NextRequest) {
       };
       
       console.log('Calling textract.detectDocumentText with PDF...');
-      const textractResponse = await textract.detectDocumentText(detectParams).promise();
+      const textractResponse = await textractClient.send(
+        new DetectDocumentTextCommand(detectParams)
+      );
       
       // This should not succeed, but if it does, process the result
       const blocks = textractResponse.Blocks || [];
@@ -166,12 +188,12 @@ export async function POST(request: NextRequest) {
         const uploadKey = `test-uploads/${Date.now()}-test-page.png`;
         const imageBuffer = Buffer.from(await pageImageFile.arrayBuffer());
         
-        await s3.putObject({
+        await s3Client.send(new PutObjectCommand({
           Bucket: bucketName!,
           Key: uploadKey,
           Body: imageBuffer,
           ContentType: 'image/png'
-        }).promise();
+        }));
         console.log(`Uploaded test page image to S3: ${uploadKey}`);
         
         // Try to use Textract on the page image
@@ -185,13 +207,17 @@ export async function POST(request: NextRequest) {
         };
         
         console.log('Calling textract.detectDocumentText with page image...');
-        const textractResponse = await textract.detectDocumentText(detectParams).promise();
+        const textractResponse = await textractClient.send(
+          new DetectDocumentTextCommand(detectParams)
+        );
         
         // Process the results
         const blocks = textractResponse.Blocks || [];
-        const textBlocks = blocks.filter(block => block.BlockType === 'LINE' || block.BlockType === 'WORD');
+        const textBlocks = blocks.filter((block: TextractBlock) => 
+          block.BlockType === 'LINE' || block.BlockType === 'WORD'
+        );
         const extractedText = textBlocks
-          .map(block => block.Text)
+          .map((block: TextractBlock) => block.Text)
           .filter(Boolean)
           .join(' ');
         

@@ -1,10 +1,14 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { FileUploader } from "./file-uploader"
 import { DocumentViewer } from "./document-viewer"
 import { DataExtractor } from "./data-extractor"
 import { RedactionControls } from "./redaction-controls"
+import { AwsCredentialsHelper } from './aws-credentials-helper'
+
+// UI Components
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -15,27 +19,95 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
+import { useToast, toast } from "@/components/ui/use-toast"
+
+// Icons
+import { 
+  Plus, 
+  Pencil, 
+  Trash2, 
+  AlertTriangle, 
+  Save, 
+  X, 
+  ChevronRight, 
+  ChevronDown, 
+  Copy, 
+  Loader2, 
+  FileText, 
+  Settings, 
+  AlignLeft, 
+  Scissors, 
+  FileSearch, 
+  Wrench, 
+  Eraser, 
+  RefreshCw, 
+  FileUp, 
+  CheckIcon 
+} from "lucide-react"
+
+// Services & Utils
+import { useConfigStoreDB } from "@/lib/config-store-db"
 import { processDocument, classifyDocument, submitClassificationFeedback } from "@/lib/document-processing"
 import { redactDocument } from "@/lib/redaction"
-import type { DocumentData, DataElementConfig, DocumentTypeConfig, AnyBoundingBox, AwsBoundingBox, ClassificationResult } from "@/lib/types"
-import { Loader2, FileText, Settings, AlignLeft, AlertTriangle, Scissors, FileSearch, Wrench, Eraser, RefreshCw, FileUp, CheckIcon } from "lucide-react"
-import { useConfigStore } from "@/lib/config-store"
-import { useRouter } from "next/navigation"
 import { convertPdfToBase64 } from "../lib/pdf-utils"
 import { ensurePdfJsLoaded, reloadPdfJs } from "@/lib/pdf-preloader"
 import { processMultiPagePdf, RedactionElement, applyRedactionsToPdf } from '@/lib/pdf-redaction'
-import { AwsCredentialsHelper } from './aws-credentials-helper'
-import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
-import { useToast } from "@/components/ui/use-toast"
-import { toast } from "@/components/ui/use-toast"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+
+// Types
+import type { 
+  DocumentData, 
+  DocumentTypeConfig, 
+  DocumentSubTypeConfig, 
+  DataElementConfig, 
+  DataElementType, 
+  DataElementCategory, 
+  DataElementAction,
+  ClassificationResult 
+} from "@/lib/types"
+
+// Define missing types
+interface AnyBoundingBox {
+  // Both formats may be present, so include all possible properties
+  Left?: number;
+  Top?: number;
+  Width?: number;
+  Height?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+interface AwsBoundingBox {
+  Left: number;
+  Top: number;
+  Width: number;
+  Height: number;
+}
 
 // Helper functions
 // Extended RedactionElement type to include properties we need
-interface ExtendedRedactionElement extends RedactionElement {
+interface ExtendedRedactionElement extends Omit<RedactionElement, 'boundingBox'> {
   label?: string;
   type?: string;
+  isConfigured?: boolean;
+  missing?: boolean;
+  boundingBox: AnyBoundingBox | null | undefined;
 }
 
 // Helper function to check if a bounding box is AWS style (with Left, Top, etc.)
@@ -99,7 +171,7 @@ const convertBase64ToFile = (base64Data: string, filename: string, mimeType: str
 
 export function DocumentProcessor() {
   const router = useRouter()
-  const { config, activeDocumentTypeId, setActiveDocumentType } = useConfigStore()
+  const { config, activeDocumentTypeId, setActiveDocumentType } = useConfigStoreDB()
   const [file, setFile] = useState<File | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [documentData, setDocumentData] = useState<DocumentData | null>(null)
@@ -138,6 +210,40 @@ export function DocumentProcessor() {
   }>>([])
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
   const { toast } = useToast()
+  const [selectedSubTypeId, setSelectedSubTypeId] = useState<string | null>(null)
+
+  // Add after selectedSubTypeId state declaration:
+  // Function to get a list of configured data elements based on the current document type/sub-type
+  const getConfiguredDataElements = () => {
+    if (!activeDocumentTypeId) return [];
+    
+    const docType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId);
+    if (!docType) return [];
+    
+    // If a sub-type is selected, use its data elements
+    if (selectedSubTypeId) {
+      const subType = docType.subTypes?.find(st => st.id === selectedSubTypeId);
+      if (subType) {
+        return subType.dataElements;
+      }
+    }
+    
+    // Otherwise, use the document type's data elements
+    return docType.dataElements;
+  };
+  
+  // Function to check if an extracted field matches a configured data element
+  const matchesConfiguredElement = (fieldName: string, configuredElements: DataElementConfig[]) => {
+    return configuredElements.some(element => 
+      element.name.toLowerCase() === fieldName.toLowerCase() ||
+      fieldName.toLowerCase().includes(element.name.toLowerCase())
+    );
+  };
+  
+  // Function to filter data elements based on action type
+  const filterDataElementsByAction = (elements: DataElementConfig[], actions: DataElementAction[]) => {
+    return elements.filter(element => actions.includes(element.action));
+  };
 
   // Preload PDF.js when the component mounts
   useEffect(() => {
@@ -175,6 +281,11 @@ export function DocumentProcessor() {
       setActiveTab("original")
     }
   }, [imageUrl])
+
+  // When the document type changes, reset the selected sub-type
+  useEffect(() => {
+    setSelectedSubTypeId(null);
+  }, [activeDocumentTypeId]);
 
   const handleFileUpload = async (uploadedFile: File | null) => {
     if (!uploadedFile) {
@@ -339,6 +450,21 @@ export function DocumentProcessor() {
                 'auto'
               );
               
+              // Try to auto-select a sub-type based on the document name if sub-types exist
+              if (matchingDocType.subTypes && matchingDocType.subTypes.length > 0) {
+                // Try to match a sub-type name in the filename or document type
+                const fileName = file.name.toLowerCase();
+                const potentialSubType = matchingDocType.subTypes.find(subType => 
+                  fileName.includes(subType.name.toLowerCase()) ||
+                  result.documentType.toLowerCase().includes(subType.name.toLowerCase())
+                );
+                
+                if (potentialSubType) {
+                  console.log(`Auto-selected sub-type: ${potentialSubType.name}`);
+                  setSelectedSubTypeId(potentialSubType.id);
+                }
+              }
+              
               // Continue with processing
               await processWithDocType(matchingDocType);
             } else {
@@ -401,17 +527,34 @@ export function DocumentProcessor() {
       setProcessingStatus('Processing document...');
       setProcessingProgress(50);
       
+      // Find the selected sub-type if any
+      const selectedSubType = selectedSubTypeId 
+        ? docType.subTypes?.find(subType => subType.id === selectedSubTypeId)
+        : docType.subTypes?.find(subType => subType.isActive);
+      
       // Process the document using our processDocument function from lib/document-processing
       const data = await processDocument(
         file!,
         {
           documentType: docType.name,
-          elementsToExtract: docType.dataElements.map(e => ({
-            id: e.id,
-            name: e.name,
-            type: e.type,
-            required: e.required
-          }))
+          subType: selectedSubType?.name, // Include subType if available
+          elementsToExtract: selectedSubType ? 
+            // If a sub-type is selected, use its data elements
+            selectedSubType.dataElements.map(e => ({
+              id: e.id,
+              name: e.name,
+              type: e.type,
+              required: e.required
+            })) :
+            // Otherwise use the main document type's data elements
+            docType.dataElements.map(e => ({
+              id: e.id,
+              name: e.name,
+              type: e.type,
+              required: e.required
+            })),
+          // Check if this is an ID document and the sub-type uses ID analysis
+          useIdAnalysis: selectedSubType?.awsAnalysisType === 'TEXTRACT_ANALYZE_ID'
         },
         false // Don't use classification again since we already did it
       );
@@ -420,8 +563,19 @@ export function DocumentProcessor() {
       setDocumentData(data);
       setActiveTab("extracted");
       
+      // Get the configured data elements
+      const configuredElements = getConfiguredDataElements();
+      const extractableElements = filterDataElementsByAction(
+        configuredElements, 
+        ['Extract', 'ExtractAndRedact']
+      );
+      
       // Convert fields to elements for redaction if needed
       if (data.extractedFields && data.extractedFields.length > 0) {
+        // Check for missing configured elements
+        const extractedFieldNames = new Set(data.extractedFields.map(field => field.label.toLowerCase()));
+        
+        // Add all found fields as elements
         const elements = data.extractedFields.map(field => ({
           id: field.id,
           label: field.label,
@@ -430,14 +584,56 @@ export function DocumentProcessor() {
           value: field.value,
           confidence: field.confidence,
           boundingBox: field.boundingBox,
-          pageIndex: 0
-        } as RedactionElement));
-        setExtractedElements(elements);
+          pageIndex: 0,
+          isConfigured: matchesConfiguredElement(field.label, configuredElements)
+        } as ExtendedRedactionElement));
+        
+        // Add placeholders for configured elements that weren't found
+        const missingElements = extractableElements
+          .filter(element => !Array.from(extractedFieldNames).some(
+            fieldName => fieldName === element.name.toLowerCase() || 
+            fieldName.includes(element.name.toLowerCase()))
+          )
+          .map(element => ({
+            id: `missing-${element.id}`,
+            label: element.name,
+            text: 'Not found in document',
+            type: element.type,
+            value: null,
+            confidence: 0,
+            boundingBox: null as (AnyBoundingBox | null),
+            pageIndex: 0,
+            isConfigured: true,
+            missing: true
+          } as ExtendedRedactionElement));
+        
+        setExtractedElements([...elements, ...missingElements] as unknown as RedactionElement[]);
+        
+        // Auto-select elements that should be redacted
+        const redactableElementIds = new Set(
+          elements
+            .filter(element => {
+              if (!element.label) return false;
+              
+              // Find matching configured element
+              const matchingElement = configuredElements.find(configEl => 
+                configEl.name.toLowerCase() === (element.label?.toLowerCase() ?? '') ||
+                (element.label?.toLowerCase() ?? '').includes(configEl.name.toLowerCase())
+              );
+              
+              // Check if it should be redacted
+              return matchingElement && 
+                (matchingElement.action === 'Redact' || matchingElement.action === 'ExtractAndRedact');
+            })
+            .map(element => element.id)
+        );
+        
+        setSelectedElements(Array.from(redactableElementIds));
       }
       
       toast({
         title: "Document processed successfully",
-        description: `Extracted ${data.extractedFields?.length || 0} fields`,
+        description: `Extracted ${data.extractedFields?.length || 0} fields${data.subType ? ` (${data.subType})` : ''}`,
         variant: "default"
       });
       
@@ -1063,67 +1259,6 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
     });
   };
 
-  // Add predefined redaction templates for common document types
-  const redactionTemplates = {
-    passport: [
-      { id: 'template-passport-number', label: 'Passport Number', boundingBoxRatio: { Left: 0.7, Top: 0.16, Width: 0.25, Height: 0.04 } },
-      { id: 'template-mrz-line1', label: 'MRZ Line 1', boundingBoxRatio: { Left: 0.05, Top: 0.94, Width: 0.9, Height: 0.025 } },
-      { id: 'template-mrz-line2', label: 'MRZ Line 2', boundingBoxRatio: { Left: 0.05, Top: 0.97, Width: 0.9, Height: 0.025 } },
-      { id: 'template-photo', label: 'Photo', boundingBoxRatio: { Left: 0.05, Top: 0.2, Width: 0.3, Height: 0.4 } },
-      { id: 'template-signature', label: 'Signature', boundingBoxRatio: { Left: 0.6, Top: 0.7, Width: 0.3, Height: 0.1 } }
-    ],
-    driverLicense: [
-      { id: 'template-license-number', label: 'License Number', boundingBoxRatio: { Left: 0.6, Top: 0.3, Width: 0.35, Height: 0.05 } },
-      { id: 'template-photo', label: 'Photo', boundingBoxRatio: { Left: 0.05, Top: 0.2, Width: 0.3, Height: 0.45 } },
-      { id: 'template-signature', label: 'Signature', boundingBoxRatio: { Left: 0.5, Top: 0.7, Width: 0.4, Height: 0.1 } }
-    ]
-  };
-  
-  // Apply a predefined template based on document type
-  const applyRedactionTemplate = (templateType: 'passport' | 'driverLicense') => {
-    if (!redactionTemplates[templateType] || !imageUrl) {
-      toast({
-        title: "Cannot apply template",
-        description: "Template not available or no document loaded",
-        variant: "destructive"
-      });
-      return;
-    }
-    
-    // Create new selection elements from the template
-    const newSelections = redactionTemplates[templateType].map(template => ({
-      id: `${template.id}-${Date.now()}`,
-      label: template.label,
-      boundingBox: template.boundingBoxRatio
-    }));
-    
-    // Add to manual selections
-    setManualSelections(prev => [...prev, ...newSelections]);
-    
-    // Add to selected elements for redaction
-    const newSelectedElementIds = newSelections.map(s => s.id);
-    setSelectedElements(prev => [...prev, ...newSelectedElementIds]);
-    
-    // Add to extracted elements
-    const newExtractedElements = newSelections.map(selection => ({
-      id: selection.id,
-      text: selection.label,
-      label: selection.label,
-      type: 'Template',
-      confidence: 1.0,
-      boundingBox: selection.boundingBox,
-      pageIndex: 0
-    }));
-    
-    setExtractedElements(prev => [...prev, ...newExtractedElements]);
-    
-    toast({
-      title: "Template Applied",
-      description: `Applied ${templateType} template with ${newSelections.length} redaction zones`,
-      variant: "default"
-    });
-  };
-
   // Function to detect patterns in extracted text
   const detectPatterns = (text: string) => {
     if (!text) return [];
@@ -1356,6 +1491,45 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                   )}
                 </div>
               )}
+
+              {/* Add Sub-Type Selection */}
+              {activeDocumentTypeId && activeDocType?.subTypes && activeDocType.subTypes.length > 0 && (
+                <div className="mt-2">
+                  <label className="text-sm font-medium mb-1 block">
+                    Document Sub-Type
+                  </label>
+                  <Select
+                    value={selectedSubTypeId || 'none'}
+                    onValueChange={(value) => setSelectedSubTypeId(value === 'none' ? null : value)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select sub-type (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        No specific sub-type
+                      </SelectItem>
+                      {activeDocType.subTypes
+                        .filter(subType => subType.isActive)
+                        .map((subType) => (
+                          <SelectItem key={subType.id} value={subType.id}>
+                            {subType.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedSubTypeId && activeDocType?.subTypes && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <Badge variant="outline">
+                        Analysis: {activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.awsAnalysisType || 'TEXTRACT_ANALYZE_DOCUMENT'}
+                      </Badge>
+                      <p className="text-xs text-muted-foreground">
+                        {activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.description}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               
               <FileUploader onFileUpload={handleFileUpload} isProcessing={isUploading} file={file} />
             </div>
@@ -1456,28 +1630,6 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                           </>
                         )}
                       </Button>
-                    )}
-                    
-                    {/* Add template buttons */}
-                    {file && (
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => applyRedactionTemplate('passport')}
-                          variant="outline"
-                          className="gap-2"
-                        >
-                          <Scissors className="h-4 w-4" />
-                          Apply Passport Template
-                        </Button>
-                        <Button
-                          onClick={() => applyRedactionTemplate('driverLicense')}
-                          variant="outline"
-                          className="gap-2"
-                        >
-                          <Scissors className="h-4 w-4" />
-                          Apply Driver's License Template
-                        </Button>
-                      </div>
                     )}
                   </div>
                   {!isFileFormatSupported() && file && (
@@ -1838,7 +1990,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
               
               {activeDocType && (
                 <div className="mb-4 flex flex-wrap gap-2">
-                  {activeDocType.dataElements
+                  {getConfiguredDataElements()
                     .filter(de => de.action === 'Redact' || de.action === 'ExtractAndRedact')
                     .map(de => (
                       <Badge key={de.id} variant="outline" className="px-2 py-1 text-xs">
@@ -1852,6 +2004,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 <TabsList>
                   <TabsTrigger value="list">List View</TabsTrigger>
                   <TabsTrigger value="category">By Category</TabsTrigger>
+                  <TabsTrigger value="configuration">By Configuration</TabsTrigger>
                 </TabsList>
                 
                 <TabsContent value="list" className="mt-4">
@@ -1862,14 +2015,17 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                         className={`p-3 border rounded flex flex-col hover:bg-gray-50 transition-colors ${
                           selectedElements.includes(element.id) 
                             ? 'border-blue-500 bg-blue-50 shadow-sm' 
-                            : 'border-gray-200'
-                        }`}
+                            : (element as ExtendedRedactionElement).missing
+                              ? 'border-gray-200 bg-gray-50 opacity-75'
+                              : 'border-gray-200'
+                        } ${(element as ExtendedRedactionElement).isConfigured ? 'border-l-4 border-l-blue-400' : ''}`}
                       >
                         <div className="flex items-center space-x-3 cursor-pointer" onClick={() => toggleElementSelection(element.id)}>
                           <Checkbox
                             checked={selectedElements.includes(element.id)}
                             onCheckedChange={() => toggleElementSelection(element.id)}
                             className={`h-5 w-5 ${selectedElements.includes(element.id) ? 'bg-blue-600 border-blue-600' : ''}`}
+                            disabled={(element as ExtendedRedactionElement).missing}
                           />
                           <div className="flex-1">
                             <div className={`font-medium truncate max-w-md ${selectedElements.includes(element.id) ? 'text-blue-700' : ''}`}>
@@ -1881,15 +2037,23 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                                   ? 'None' 
                                   : (element as ExtendedRedactionElement).type || 'Text'}
                               </Badge>
+                              {(element as ExtendedRedactionElement).isConfigured && (
+                                <Badge variant="outline" className="text-xs bg-blue-50">
+                                  Configured Element: {(element as ExtendedRedactionElement).label}
+                                </Badge>
+                              )}
                               <span className="text-muted-foreground">
-                                Page: {element.pageIndex + 1} | Confidence: {Math.min(100, (element.confidence * 100)).toFixed(0)}%
+                                {(element as ExtendedRedactionElement).missing 
+                                  ? 'Not found in document'
+                                  : `Page: ${element.pageIndex + 1} | Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
+                                }
                               </span>
                             </div>
                           </div>
                         </div>
                         
                         {/* Add controls for changing element type */}
-                        {selectedElements.includes(element.id) && activeDocType && (
+                        {selectedElements.includes(element.id) && activeDocType && !(element as ExtendedRedactionElement).missing && (
                           <div className="mt-2 pt-2 border-t border-dashed flex items-center gap-2">
                             <div className="text-xs font-medium">Change type:</div>
                             <Select
@@ -1924,7 +2088,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="none">None</SelectItem>
-                                {activeDocType?.dataElements.map((de) => (
+                                {getConfiguredDataElements().map((de) => (
                                   <SelectItem key={de.id} value={de.type || de.name}>
                                     {de.name}
                                   </SelectItem>
@@ -1936,7 +2100,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                         )}
                         
                         {/* Show bounding box information if available */}
-                        {element.boundingBox && (
+                        {element.boundingBox && !(element as ExtendedRedactionElement).missing && (
                           <div className="mt-2 text-xs text-muted-foreground">
                             <div className="flex justify-between">
                               <span>Position: {
@@ -1997,13 +2161,18 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                             <div 
                               key={element.id}
                               className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
-                                selectedElements.includes(element.id) ? 'border-blue-500 bg-blue-50' : ''
-                              }`}
+                                selectedElements.includes(element.id) 
+                                  ? 'border-blue-500 bg-blue-50' 
+                                  : (element as ExtendedRedactionElement).missing
+                                    ? 'border-gray-200 bg-gray-50 opacity-75'
+                                    : ''
+                              } ${(element as ExtendedRedactionElement).isConfigured ? 'border-l-4 border-l-blue-400' : ''}`}
                               onClick={() => toggleElementSelection(element.id)}
                             >
                               <Checkbox
                                 checked={selectedElements.includes(element.id)}
                                 onCheckedChange={() => toggleElementSelection(element.id)}
+                                disabled={(element as ExtendedRedactionElement).missing}
                               />
                               <div className="flex-1">
                                 <div className="truncate max-w-md">{element.text}</div>
@@ -2013,6 +2182,12 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                                       ? 'None' 
                                       : (element as ExtendedRedactionElement).type || 'Text'}
                                   </Badge>
+                                  <span className="text-muted-foreground">
+                                    {(element as ExtendedRedactionElement).missing 
+                                      ? 'Not found in document'
+                                      : `Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
+                                    }
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -2021,6 +2196,99 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                       </div>
                     ))}
                   </div>
+                </TabsContent>
+                
+                <TabsContent value="configuration" className="mt-4">
+                  {activeDocType && (
+                    <div className="space-y-4">
+                      {/* Configured elements section */}
+                      <div className="border rounded-md p-4">
+                        <h4 className="font-medium mb-2">Configured Elements</h4>
+                        <div className="space-y-2">
+                          {extractedElements
+                            .filter(element => (element as ExtendedRedactionElement).isConfigured)
+                            .map(element => (
+                              <div 
+                                key={element.id}
+                                className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
+                                  selectedElements.includes(element.id) 
+                                    ? 'border-blue-500 bg-blue-50' 
+                                    : (element as ExtendedRedactionElement).missing
+                                      ? 'border-gray-200 bg-gray-50 opacity-75'
+                                      : ''
+                                }`}
+                                onClick={() => toggleElementSelection(element.id)}
+                              >
+                                <Checkbox
+                                  checked={selectedElements.includes(element.id)}
+                                  onCheckedChange={() => toggleElementSelection(element.id)}
+                                  disabled={(element as ExtendedRedactionElement).missing}
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium">
+                                    {(element as ExtendedRedactionElement).label}
+                                  </div>
+                                  <div className="text-sm">{element.text}</div>
+                                  <div className="text-xs flex items-center gap-2 mt-1">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {(element as ExtendedRedactionElement).type || 'Text'}
+                                    </Badge>
+                                    <span className="text-muted-foreground">
+                                      {(element as ExtendedRedactionElement).missing 
+                                        ? 'Not found in document'
+                                        : `Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                      
+                      {/* Other detected elements section */}
+                      <div className="border rounded-md p-4">
+                        <h4 className="font-medium mb-2">Other Detected Elements</h4>
+                        <div className="space-y-2">
+                          {extractedElements
+                            .filter(element => !(element as ExtendedRedactionElement).isConfigured && !(element as ExtendedRedactionElement).missing)
+                            .map(element => (
+                              <div 
+                                key={element.id}
+                                className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
+                                  selectedElements.includes(element.id) ? 'border-blue-500 bg-blue-50' : ''
+                                }`}
+                                onClick={() => toggleElementSelection(element.id)}
+                              >
+                                <Checkbox
+                                  checked={selectedElements.includes(element.id)}
+                                  onCheckedChange={() => toggleElementSelection(element.id)}
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium">
+                                    {(element as ExtendedRedactionElement).label || 'Unknown element'}
+                                  </div>
+                                  <div className="text-sm">{element.text}</div>
+                                  <div className="text-xs flex items-center gap-2 mt-1">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {(element as ExtendedRedactionElement).type || 'Text'}
+                                    </Badge>
+                                    <span className="text-muted-foreground">
+                                      Confidence: {Math.min(100, (element.confidence * 100)).toFixed(0)}%
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          {extractedElements.filter(element => !(element as ExtendedRedactionElement).isConfigured && !(element as ExtendedRedactionElement).missing).length === 0 && (
+                            <div className="text-sm text-muted-foreground text-center py-2">
+                              No additional elements detected
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
               </Tabs>
               

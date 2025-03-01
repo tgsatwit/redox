@@ -1,9 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { useConfigStore } from "@/lib/config-store"
+import { useConfigStoreDB } from "@/lib/config-store-db"
 import { TrainingDataset, TrainingExample } from "@/lib/types"
-import { v4 as uuidv4 } from "uuid"
 
 import {
   Card,
@@ -55,7 +54,7 @@ export function TrainingDatasetPanel() {
     updateTrainingDataset,
     updateModelStatus,
     setDefaultModelForDocType
-  } = useConfigStore()
+  } = useConfigStoreDB()
 
   const activeDocType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId)
   
@@ -262,8 +261,7 @@ export function TrainingDatasetPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-medium">Training Datasets</h3>
+      <div className="flex justify-end">
         <Dialog open={newDatasetOpen} onOpenChange={setNewDatasetOpen}>
           <DialogTrigger asChild>
             <Button size="sm" variant="outline" className="gap-1">

@@ -9,179 +9,195 @@ import {
   CreateDocumentClassifierCommand 
 } from '@aws-sdk/client-comprehend';
 import { v4 as uuidv4 } from 'uuid';
+import { fromEnv } from '@aws-sdk/credential-providers';
 
-// Get AWS credentials from environment
-const getAwsCredentials = () => {
-  const requiredEnvVars = [
-    'AWS_REGION', 
-    'AWS_ACCESS_KEY_ID', 
-    'AWS_SECRET_ACCESS_KEY'
-  ];
-  
-  for (const envVar of requiredEnvVars) {
-    if (!process.env[envVar]) {
-      throw new Error(`${envVar} environment variable is not set`);
-    }
+// Function to get AWS credentials
+function getAwsCredentials() {
+  // In production, AWS credentials will be available from the environment
+  if (process.env.NODE_ENV === 'production') {
+    return fromEnv();
   }
   
+  // In development, use local credentials from environment variables
   return {
-    region: process.env.AWS_REGION,
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
-    }
+    },
+    region: process.env.AWS_REGION || 'us-east-1'
   };
-};
+}
 
 interface TrainRequest {
   documentType: string;
+  documentSubType?: string;
   count?: number;
 }
 
 export async function POST(request: Request) {
   try {
-    // Parse the request body
-    const body: TrainRequest = await request.json();
+    // Parse request body
+    const body = await request.json();
+    const { documentType, documentSubType, count } = body;
     
     // Validate required fields
-    if (!body.documentType) {
+    if (!documentType) {
       return NextResponse.json(
         { error: 'documentType is required' },
         { status: 400 }
       );
     }
-
-    // Get the DynamoDB table name from environment
-    const feedbackTableName = process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE;
     
-    if (!feedbackTableName) {
+    // Check for required environment variables
+    if (!process.env.AWS_REGION || !process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE) {
       return NextResponse.json(
-        { error: 'DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE environment variable is not set' },
-        { status: 400 }
+        { error: 'Missing required environment variables: AWS_REGION or DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE' },
+        { status: 500 }
       );
     }
-
-    try {
-      // Set up DynamoDB client with AWS credentials
-      const dynamoClient = new DynamoDBClient(getAwsCredentials());
-      const comprehendClient = new ComprehendClient(getAwsCredentials());
+    
+    // Initialize DynamoDB and Comprehend clients
+    const dynamoDb = new DynamoDBClient({
+      ...getAwsCredentials(),
+      region: process.env.AWS_REGION
+    });
+    
+    const comprehendClient = new ComprehendClient({
+      ...getAwsCredentials(),
+      region: process.env.AWS_REGION
+    });
+    
+    // Build the filter expression for scanning
+    let filterExpression = 'hasBeenUsedForTraining = :false';
+    let expressionAttributeValues: any = {
+      ':false': { BOOL: false }
+    };
+    
+    // Add document type to filter if not "all"
+    if (documentType !== 'all') {
+      // If documentType is "all", we don't filter by type
+      filterExpression += ' AND (correctedDocumentType = :docType OR originalClassification.documentType = :docType)';
+      expressionAttributeValues[':docType'] = { S: documentType };
+    }
+    
+    // Add sub-type to filter if provided
+    if (documentSubType) {
+      filterExpression += ' AND documentSubType = :subType';
+      expressionAttributeValues[':subType'] = { S: documentSubType };
+    }
+    
+    // Limit the number of items to retrieve if count is specified
+    const scanParams: any = {
+      TableName: process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE,
+      FilterExpression: filterExpression,
+      ExpressionAttributeValues: expressionAttributeValues
+    };
+    
+    if (count && count > 0) {
+      scanParams.Limit = count;
+    }
+    
+    // Scan DynamoDB for feedback items
+    const scanResponse = await dynamoDb.send(new ScanCommand(scanParams));
+    
+    if (!scanResponse.Items || scanResponse.Items.length === 0) {
+      return NextResponse.json(
+        { message: 'No feedback items found for training' },
+        { status: 200 }
+      );
+    }
+    
+    // Log the items for debugging
+    console.log(`Found ${scanResponse.Items.length} feedback items for training`, scanResponse.Items);
+    
+    // Process items for training
+    const trainingItems = scanResponse.Items.map(item => {
+      // Get the document type from corrected type or original classification
+      const itemDocType = item.correctedDocumentType?.S || 
+        (item.originalClassification?.M?.documentType?.S) || 
+        'Unknown';
       
-      // Scan DynamoDB to get feedback items for this document type
-      // Only get items that haven't been used for training yet
-      const scanCommand = new ScanCommand({
-        TableName: feedbackTableName,
-        FilterExpression: "(correctedDocumentType = :docType OR originalClassificationType = :docType) AND hasBeenUsedForTraining = :hasBeenUsed",
-        ExpressionAttributeValues: {
-          ":docType": { S: body.documentType },
-          ":hasBeenUsed": { BOOL: false }
-        }
-      });
+      // Get the sub-type if available
+      const itemSubType = item.documentSubType?.S || 'General';
       
-      const scanResult = await dynamoClient.send(scanCommand);
-      
-      if (!scanResult.Items || scanResult.Items.length === 0) {
-        return NextResponse.json(
-          { error: 'No untrained feedback items found for this document type' },
-          { status: 400 }
+      return {
+        id: item.id.S,
+        documentType: itemDocType,
+        documentSubType: itemSubType,
+        // Extract other relevant data for training
+        // ...
+      };
+    });
+    
+    // Generate a unique job ID for this training job
+    const trainingJobId = uuidv4();
+    
+    // In development, we just mark the items as used
+    // In production, we would initiate the AWS Comprehend training job
+    if (process.env.NODE_ENV === 'development') {
+      // For each item, update hasBeenUsedForTraining to true
+      for (const item of trainingItems) {
+        if (!item.id) continue; // Skip items with undefined IDs
+        
+        await dynamoDb.send(
+          new UpdateItemCommand({
+            TableName: process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE,
+            Key: {
+              id: { S: item.id }
+            },
+            UpdateExpression: 'SET hasBeenUsedForTraining = :true, trainingJobId = :jobId, trainingTimestamp = :timestamp',
+            ExpressionAttributeValues: {
+              ':true': { BOOL: true },
+              ':jobId': { S: trainingJobId },
+              ':timestamp': { N: Date.now().toString() }
+            }
+          })
         );
       }
       
-      console.log(`Found ${scanResult.Items.length} feedback items for training`);
-      
-      // Process feedback items to prepare training data
-      const trainingData = scanResult.Items.map(item => {
-        // For trained examples, prefer corrected document type over original
-        const documentType = item.correctedDocumentType?.S || item.originalClassificationType?.S || 'Unknown';
-        
-        // Return formatted training example
-        return {
-          documentType,
-          feedbackId: item.id.S
-        };
-      });
-      
-      // In a real implementation, we would now:
-      // 1. Generate a training CSV or manifest file
-      // 2. Upload it to S3
-      // 3. Start an AWS Comprehend training job
-      
-      // For demonstration, we'll just simulate these steps:
-      const trainingJobId = uuidv4();
-      
-      // For development/testing environment, simulate a successful response
-      if (process.env.NODE_ENV === 'development') {
-        // Mark feedback items as used for training
-        for (const item of scanResult.Items) {
-          // Skip items with undefined id
-          if (!item.id?.S) continue;
-          
-          const updateCommand = new UpdateItemCommand({
-            TableName: feedbackTableName,
-            Key: { id: { S: item.id.S } },
-            UpdateExpression: "SET hasBeenUsedForTraining = :hasBeenUsed",
-            ExpressionAttributeValues: {
-              ":hasBeenUsed": { BOOL: true }
-            }
-          });
-          
-          await dynamoClient.send(updateCommand);
-        }
-        
-        return NextResponse.json({
-          success: true,
-          message: 'Training job initiated successfully',
-          trainingJobId,
-          itemsUsed: scanResult.Items.length,
-          documentType: body.documentType,
-          isDevelopment: true
-        });
-      }
-      
-      // For production, actually start a Comprehend training job
-      // This requires proper AWS IAM permissions and S3 bucket setup
-      try {
-        const roleArn = process.env.AWS_COMPREHEND_ROLE_ARN;
-        const s3BucketName = process.env.AWS_S3_BUCKET;
-        
-        if (!roleArn || !s3BucketName) {
-          throw new Error('AWS_COMPREHEND_ROLE_ARN and AWS_S3_BUCKET environment variables must be set');
-        }
-        
-        // TODO: This part would need to be implemented based on your specific AWS setup
-        // It requires generating a training dataset, uploading to S3, and starting 
-        // a Comprehend training job
-        
-        return NextResponse.json({
-          success: true,
-          message: 'Training job initiated on AWS Comprehend',
-          trainingJobId: 'aws-job-id-would-be-here',
-          itemsUsed: scanResult.Items.length,
-          documentType: body.documentType
-        });
-      } catch (comprehendError) {
-        console.error('AWS Comprehend Error:', comprehendError);
-        
-        return NextResponse.json({
-          error: 'Failed to start training job on AWS Comprehend',
-          details: comprehendError instanceof Error ? comprehendError.message : String(comprehendError)
-        }, { status: 500 });
-      }
-    } catch (dbError) {
-      console.error('DynamoDB Error:', dbError);
-      
       return NextResponse.json({
-        error: 'Failed to retrieve feedback items from DynamoDB',
-        details: dbError instanceof Error ? dbError.message : String(dbError)
-      }, { status: 500 });
+        message: 'Training job initiated (development mode - items marked as used)',
+        jobId: trainingJobId,
+        processedCount: trainingItems.length,
+        documentType,
+        documentSubType
+      });
+    } else {
+      // In production, we would:
+      // 1. Prepare the training data in the format required by AWS Comprehend
+      // 2. Start a training job with AWS Comprehend
+      // 3. Update the feedback items with the training job ID
+      
+      // Example (not implemented):
+      /*
+      const trainResponse = await comprehendClient.send(
+        new CreateDocumentClassifierCommand({
+          DocumentClassifierName: `document-classifier-${trainingJobId}`,
+          DataAccessRoleArn: process.env.COMPREHEND_ROLE_ARN,
+          InputDataConfig: {
+            // ... training data configuration
+          },
+          LanguageCode: 'en'
+        })
+      );
+      
+      // Update items with training job ID
+      // ...
+      */
+      
+      // For now, just return a simulated response
+      return NextResponse.json({
+        message: 'Training job would be initiated in production',
+        jobId: trainingJobId,
+        processedCount: trainingItems.length,
+        documentType,
+        documentSubType
+      });
     }
   } catch (error) {
-    console.error('Error processing training request:', error);
-    
+    console.error('Error training with feedback:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to process training request', 
-        details: error instanceof Error ? error.message : String(error)
-      },
+      { error: error instanceof Error ? error.message : 'Unknown error occurred' },
       { status: 500 }
     );
   }

@@ -3,12 +3,14 @@ import { extractTextFallback } from "./text-extraction"
 
 interface ProcessOptions {
   documentType: string
+  subType?: string
   elementsToExtract: Array<{
     id: string
     name: string
     type: string
     required?: boolean
   }>
+  useIdAnalysis?: boolean
 }
 
 // New function to classify a document
@@ -49,7 +51,8 @@ export async function submitClassificationFeedback(
   documentId: string,
   originalClassification: ClassificationResult | null,
   correctedDocumentType: string | null,
-  feedbackSource: 'auto' | 'manual' | 'review' = 'manual'
+  feedbackSource: 'auto' | 'manual' | 'review' = 'manual',
+  documentSubType: string | null = null
 ): Promise<void> {
   try {
     console.log("Submitting classification feedback...");
@@ -62,6 +65,7 @@ export async function submitClassificationFeedback(
         documentId,
         originalClassification,
         correctedDocumentType,
+        documentSubType,
         feedbackSource,
         timestamp: Date.now()
       }),
@@ -122,7 +126,18 @@ export async function processDocument(
     }
   }
   
-  // Original document processing logic
+  // Check if this is an ID document and should use ID analysis
+  if (options?.documentType === 'ID Document' || options?.useIdAnalysis) {
+    try {
+      // Use the specialized ID analysis endpoint for ID documents
+      return await processIdDocument(file, options);
+    } catch (idError) {
+      console.error("ID document processing failed, falling back to standard processing:", idError);
+      // Continue with standard document processing
+    }
+  }
+  
+  // Original document processing logic for non-ID documents
   const formData = new FormData();
   formData.append("file", file);
 
@@ -623,4 +638,49 @@ function createMockDocumentDataWithConfig(options: ProcessOptions): DocumentData
     documentType: options.documentType,
     extractedFields: mappedFields
   };
+}
+
+// New function to handle ID document processing
+async function processIdDocument(file: File, options?: ProcessOptions): Promise<DocumentData> {
+  console.log("Processing ID document with specialized analysis...");
+  
+  const formData = new FormData();
+  formData.append("file", file);
+  
+  if (options?.subType) {
+    formData.append("subType", options.subType);
+  }
+  
+  try {
+    console.log("Calling the analyze-id endpoint...");
+    const res = await fetch("/api/analyze-id", {
+      method: "POST",
+      body: formData,
+    });
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      console.error("ID analysis API error response:", errorData);
+      throw new Error(errorData.error || "ID document analysis failed");
+    }
+    
+    const data = await res.json();
+    console.log("ID analysis API success response:", data);
+    
+    // Map the ID-specific fields to our standard format
+    const mappedFields = options?.elementsToExtract && options.elementsToExtract.length > 0 
+      ? mapExtractedFieldsToConfig(data.extractedFields, options.elementsToExtract)
+      : data.extractedFields;
+    
+    return {
+      documentType: options?.documentType || 'ID Document',
+      confidence: data.confidence || 0,
+      extractedText: '', // ID analysis doesn't provide raw text
+      extractedFields: mappedFields || [],
+      subType: data.subType, // Include the detected sub-type
+    };
+  } catch (error) {
+    console.error("ID document analysis error:", error);
+    throw error;
+  }
 }

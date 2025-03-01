@@ -25,7 +25,7 @@ import {
 
 import { Loader2, AlertCircle, CheckCircle2, Upload, FileText } from "lucide-react"
 import { classifyDocument, submitClassificationFeedback, processDocument } from "@/lib/document-processing"
-import { useConfigStore } from "@/lib/config-store"
+import { useConfigStoreDB } from "@/lib/config-store-db"
 import type { ClassificationResult, DocumentData } from "@/lib/types"
 
 type ClassificationStatus = 
@@ -43,7 +43,7 @@ export function DocumentClassificationWorkflow({
 }: {
   onDocumentProcessed?: (data: DocumentData) => void
 }) {
-  const { config } = useConfigStore()
+  const { config } = useConfigStoreDB()
   const [file, setFile] = useState<File | null>(null)
   const [status, setStatus] = useState<ClassificationStatus>("idle")
   const [progress, setProgress] = useState(0)

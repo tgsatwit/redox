@@ -43,6 +43,7 @@ export interface ExtractedField {
 
 export interface DocumentData {
   documentType: string
+  subType?: string // Add support for sub-types
   confidence: number
   extractedText: string
   extractedFields: ExtractedField[]
@@ -68,11 +69,23 @@ export interface DataElementConfig {
   isDefault?: boolean // If this is a default field for the document type
 }
 
+// New interface for document sub-types
+export interface DocumentSubTypeConfig {
+  id: string
+  name: string
+  description?: string
+  dataElements: DataElementConfig[]
+  awsAnalysisType?: 'TEXTRACT_ANALYZE_DOCUMENT' | 'TEXTRACT_ANALYZE_ID' | 'TEXTRACT_ANALYZE_EXPENSE'
+  isActive: boolean
+  documentTypeId?: string // Parent document type ID
+}
+
 export interface DocumentTypeConfig {
   id: string
   name: string
   description?: string
   dataElements: DataElementConfig[]
+  subTypes?: DocumentSubTypeConfig[] // Changed from subtypes to subTypes for consistency
   isActive: boolean
   trainingDatasets?: TrainingDataset[]
   defaultModelId?: string

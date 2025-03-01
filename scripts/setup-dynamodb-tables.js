@@ -41,8 +41,14 @@ const getDynamoDBConfig = () => {
   };
 };
 
-// Table name from environment
-const tableName = process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE || 'document-classification-feedback';
+// Table names from environment or defaults
+const FEEDBACK_TABLE = process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE || 'document-classification-feedback';
+const CONFIG_TABLE = process.env.DYNAMODB_CONFIG_TABLE || 'document-processor-config';
+const DOC_TYPE_TABLE = process.env.DYNAMODB_DOCTYPE_TABLE || 'document-processor-doctypes';
+const SUB_TYPE_TABLE = process.env.DYNAMODB_SUBTYPE_TABLE || 'document-processor-subtypes';
+const DATA_ELEMENT_TABLE = process.env.DYNAMODB_ELEMENT_TABLE || 'document-processor-elements';
+const TRAINING_DATASET_TABLE = process.env.DYNAMODB_DATASET_TABLE || 'document-processor-datasets';
+const TRAINING_EXAMPLE_TABLE = process.env.DYNAMODB_EXAMPLE_TABLE || 'document-processor-examples';
 
 // Create DynamoDB client
 const dynamoClient = new DynamoDBClient(getDynamoDBConfig());
@@ -54,10 +60,10 @@ async function setupFeedbackTable() {
     
     try {
       const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
-      tableExists = listTablesResponse.TableNames.includes(tableName);
+      tableExists = listTablesResponse.TableNames.includes(FEEDBACK_TABLE);
       
       if (tableExists) {
-        console.log(`Table '${tableName}' already exists.`);
+        console.log(`Table '${FEEDBACK_TABLE}' already exists.`);
         return;
       }
     } catch (listError) {
@@ -67,7 +73,7 @@ async function setupFeedbackTable() {
 
     // Table definition for classification feedback
     const tableParams = {
-      TableName: tableName,
+      TableName: FEEDBACK_TABLE,
       KeySchema: [
         { AttributeName: 'id', KeyType: 'HASH' } // Partition key
       ],
@@ -110,7 +116,7 @@ async function setupFeedbackTable() {
       }
     };
 
-    console.log(`Creating DynamoDB table: ${tableName}...`);
+    console.log(`Creating DynamoDB table: ${FEEDBACK_TABLE}...`);
     const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
     console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
   } catch (error) {
@@ -119,8 +125,321 @@ async function setupFeedbackTable() {
   }
 }
 
+// Setup config table for application settings
+async function setupConfigTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(CONFIG_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${CONFIG_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: CONFIG_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${CONFIG_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${CONFIG_TABLE} table:`, error);
+  }
+}
+
+// Setup document types table
+async function setupDocTypeTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(DOC_TYPE_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${DOC_TYPE_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: DOC_TYPE_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${DOC_TYPE_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${DOC_TYPE_TABLE} table:`, error);
+  }
+}
+
+// Setup sub-types table
+async function setupSubTypeTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(SUB_TYPE_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${SUB_TYPE_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: SUB_TYPE_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' },
+        { AttributeName: 'documentTypeId', AttributeType: 'S' }
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'documentTypeId-index',
+          KeySchema: [
+            { AttributeName: 'documentTypeId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${SUB_TYPE_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${SUB_TYPE_TABLE} table:`, error);
+  }
+}
+
+// Setup data elements table
+async function setupDataElementTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(DATA_ELEMENT_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${DATA_ELEMENT_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: DATA_ELEMENT_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' },
+        { AttributeName: 'documentTypeId', AttributeType: 'S' },
+        { AttributeName: 'subTypeId', AttributeType: 'S' }
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'documentTypeId-index',
+          KeySchema: [
+            { AttributeName: 'documentTypeId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        },
+        {
+          IndexName: 'subTypeId-index',
+          KeySchema: [
+            { AttributeName: 'subTypeId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${DATA_ELEMENT_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${DATA_ELEMENT_TABLE} table:`, error);
+  }
+}
+
+// Setup training datasets table
+async function setupTrainingDatasetTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(TRAINING_DATASET_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${TRAINING_DATASET_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: TRAINING_DATASET_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' },
+        { AttributeName: 'documentTypeId', AttributeType: 'S' }
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'documentTypeId-index',
+          KeySchema: [
+            { AttributeName: 'documentTypeId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${TRAINING_DATASET_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${TRAINING_DATASET_TABLE} table:`, error);
+  }
+}
+
+// Setup training examples table
+async function setupTrainingExampleTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(TRAINING_EXAMPLE_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${TRAINING_EXAMPLE_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: TRAINING_EXAMPLE_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' },
+        { AttributeName: 'documentTypeId', AttributeType: 'S' },
+        { AttributeName: 'datasetId', AttributeType: 'S' }
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'documentTypeId-index',
+          KeySchema: [
+            { AttributeName: 'documentTypeId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        },
+        {
+          IndexName: 'datasetId-index',
+          KeySchema: [
+            { AttributeName: 'datasetId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${TRAINING_EXAMPLE_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${TRAINING_EXAMPLE_TABLE} table:`, error);
+  }
+}
+
 // Run the setup
-setupFeedbackTable()
+async function setupAllTables() {
+  try {
+    await setupFeedbackTable();
+    await setupConfigTable();
+    await setupDocTypeTable();
+    await setupSubTypeTable();
+    await setupDataElementTable();
+    await setupTrainingDatasetTable();
+    await setupTrainingExampleTable();
+    console.log('All DynamoDB tables created successfully');
+  } catch (error) {
+    console.error('Error setting up DynamoDB tables:', error);
+    process.exit(1);
+  }
+}
+
+// Execute all setups
+setupAllTables()
   .then(() => {
     console.log('DynamoDB setup completed successfully');
   })

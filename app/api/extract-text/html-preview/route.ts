@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       // Upload to S3
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: process.env.AWS_BUCKET_NAME,
+          Bucket: process.env.AWS_S3_BUCKET,
           Key: key,
           Body: fileBytes,
           ContentType: file.type,
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       )
       
       // Construct the S3 URL
-      const s3Url = `https://${process.env.AWS_BUCKET_NAME}.s3.amazonaws.com/${key}`
+      const s3Url = `https://${process.env.AWS_S3_BUCKET}.s3.amazonaws.com/${key}`
       console.log(`PDF uploaded for preview at: ${s3Url}`)
       
       // Generate HTML for embedding the PDF

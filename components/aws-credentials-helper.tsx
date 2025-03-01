@@ -31,11 +31,11 @@ export function AwsCredentialsHelper() {
             </p>
             <pre className="bg-slate-100 p-2 rounded text-xs overflow-x-auto dark:bg-slate-800">
               {`AWS_REGION=your-region
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_S3_BUCKET=your-bucket-name
-AWS_TEXTRACT_ROLE_ARN=your-role-arn (optional)
-`}
+              AWS_ACCESS_KEY_ID=your-access-key
+              AWS_SECRET_ACCESS_KEY=your-secret-key
+              AWS_S3_BUCKET=your-bucket-name
+              AWS_TEXTRACT_ROLE_ARN=your-role-arn (optional)
+              `}
             </pre>
           </AccordionContent>
         </AccordionItem>
