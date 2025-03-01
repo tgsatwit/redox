@@ -1,0 +1,31 @@
+// Prevent using deprecated packages
+forbidden_packages:
+  - name: "aws-sdk"
+    reason: "Use @aws-sdk/* modular packages instead"
+  - name: "dynamodb-local"
+    reason: "Use docker compose with DynamoDB local directly"
+  - name: "inflight"
+    reason: "This module is not supported and leaks memory"
+  - name: "npmlog"
+    reason: "This package is no longer supported"
+  - name: "rimraf@3.0.2"
+    reason: "Use rimraf v4+ or node's fs.rm"
+  - name: "are-we-there-yet"
+    reason: "This package is no longer supported"
+  - name: "glob@7"
+    reason: "Use glob v9+ instead"
+  - name: "querystring"
+    reason: "Use URLSearchParams API instead"
+  - name: "gauge"
+    reason: "This package is no longer supported"
+  - name: "q"
+    reason: "Use native JavaScript promises instead"
+
+// Recommended alternatives
+recommended_packages:
+  - name: "@aws-sdk/*"
+    reason: "Modern modular AWS SDK"
+  - name: "rimraf@5.0.0"
+    reason: "Latest version without deprecation warnings"
+  - name: "glob@10.0.0"
+    reason: "Latest version without deprecation warnings" 
