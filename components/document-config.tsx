@@ -130,6 +130,57 @@ export function DocumentConfigManager() {
     if (!newDocType.name.trim()) return
     
     try {
+      // For ID documents, ensure we have appropriate default elements
+      // that are distinct from sub-type elements
+      if (newDocType.name.toLowerCase().includes('id')) {
+        // Create generic ID document elements (for when subtypes can't be detected)
+        const genericIdElements = [
+          {
+            id: crypto.randomUUID(),
+            name: 'Document Number',
+            type: 'Text' as DataElementType,
+            category: 'PII' as DataElementCategory,
+            action: 'ExtractAndRedact' as DataElementAction,
+            required: true,
+            isDefault: true,
+            description: 'Generic ID document number'
+          },
+          {
+            id: crypto.randomUUID(),
+            name: 'Full Name',
+            type: 'Name' as DataElementType,
+            category: 'PII' as DataElementCategory,
+            action: 'ExtractAndRedact' as DataElementAction,
+            required: true,
+            isDefault: true,
+            description: 'Full name on ID document'
+          },
+          {
+            id: crypto.randomUUID(),
+            name: 'Date of Birth',
+            type: 'Date' as DataElementType,
+            category: 'PII' as DataElementCategory,
+            action: 'ExtractAndRedact' as DataElementAction,
+            required: true,
+            isDefault: true,
+            description: 'Date of birth on ID document'
+          },
+          {
+            id: crypto.randomUUID(),
+            name: 'Expiration Date',
+            type: 'Date' as DataElementType,
+            category: 'General' as DataElementCategory,
+            action: 'Extract' as DataElementAction,
+            required: false,
+            isDefault: true,
+            description: 'Expiration date on ID document'
+          }
+        ]
+        
+        // Use these generic elements for ID documents
+        newDocType.dataElements = genericIdElements
+      }
+      
       await addDocumentType({
         name: newDocType.name,
         description: newDocType.description,
@@ -223,7 +274,34 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'full-name',
+          id: 'first-name-passport',
+          name: 'First Name',
+          type: 'Name',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: true,
+          isDefault: true
+        },
+        {
+          id: 'last-name-passport',
+          name: 'Last Name',
+          type: 'Name',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: true,
+          isDefault: true
+        },
+        {
+          id: 'middle-name-passport',
+          name: 'Middle Name',
+          type: 'Name',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'full-name-passport',
           name: 'Full Name',
           type: 'Name',
           category: 'PII',
@@ -232,7 +310,7 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'date-of-birth',
+          id: 'date-of-birth-passport',
           name: 'Date of Birth',
           type: 'Date',
           category: 'PII',
@@ -241,7 +319,7 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'nationality',
+          id: 'nationality-passport',
           name: 'Nationality',
           type: 'Text',
           category: 'PII',
@@ -250,7 +328,25 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'expiry-date',
+          id: 'place-of-birth-passport',
+          name: 'Place of Birth',
+          type: 'Text',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'issue-date-passport',
+          name: 'Date of Issue',
+          type: 'Date',
+          category: 'General',
+          action: 'Extract',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'expiry-date-passport',
           name: 'Expiry Date',
           type: 'Date',
           category: 'General',
@@ -259,7 +355,16 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'mrz-code',
+          id: 'passport-authority',
+          name: 'Issuing Authority',
+          type: 'Text',
+          category: 'General',
+          action: 'Extract',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'mrz-code-passport',
           name: 'MRZ Code',
           type: 'Text',
           category: 'PII',
@@ -278,7 +383,7 @@ export function DocumentConfigManager() {
       awsAnalysisType: 'TEXTRACT_ANALYZE_ID',
       dataElements: [
         {
-          id: 'license-number',
+          id: 'license-number-dl',
           name: 'License Number',
           type: 'Text',
           category: 'PII',
@@ -287,7 +392,34 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'full-name',
+          id: 'first-name-dl',
+          name: 'First Name',
+          type: 'Name',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: true,
+          isDefault: true
+        },
+        {
+          id: 'middle-name-dl',
+          name: 'Middle Name',
+          type: 'Name',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'last-name-dl',
+          name: 'Last Name',
+          type: 'Name',
+          category: 'PII',
+          action: 'ExtractAndRedact',
+          required: true,
+          isDefault: true
+        },
+        {
+          id: 'full-name-dl',
           name: 'Full Name',
           type: 'Name',
           category: 'PII',
@@ -296,7 +428,7 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'date-of-birth',
+          id: 'date-of-birth-dl',
           name: 'Date of Birth',
           type: 'Date',
           category: 'PII',
@@ -305,7 +437,7 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'address',
+          id: 'address-dl',
           name: 'Address',
           type: 'Address',
           category: 'PII',
@@ -314,7 +446,16 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'expiry-date',
+          id: 'issue-date-dl',
+          name: 'Date of Issue',
+          type: 'Date',
+          category: 'General',
+          action: 'Extract',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'expiry-date-dl',
           name: 'Expiry Date',
           type: 'Date',
           category: 'General',
@@ -323,8 +464,35 @@ export function DocumentConfigManager() {
           isDefault: true
         },
         {
-          id: 'class',
+          id: 'license-class-dl',
           name: 'License Class',
+          type: 'Text',
+          category: 'General',
+          action: 'Extract',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'state-dl',
+          name: 'State Name',
+          type: 'Text',
+          category: 'General',
+          action: 'Extract',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'endorsements-dl',
+          name: 'Endorsements',
+          type: 'Text',
+          category: 'General',
+          action: 'Extract',
+          required: false,
+          isDefault: true
+        },
+        {
+          id: 'restrictions-dl',
+          name: 'Restrictions',
           type: 'Text',
           category: 'General',
           action: 'Extract',
@@ -335,11 +503,20 @@ export function DocumentConfigManager() {
     }
     
     try {
+      // Create sub-types without affecting the parent document type
       await addSubType(activeDocumentTypeId, passportSubType)
       await addSubType(activeDocumentTypeId, driversLicenseSubType)
       
       // Sync the configuration to ensure config table is updated
       await handleSyncOperation("ID document sub-types")
+
+      // Refresh the UI to show the new sub-types
+      await resetToDefaults()
+      
+      toast({
+        title: "Success",
+        description: "Created Passport and Driver's License sub-types"
+      })
     } catch (error: any) {
       toast({
         title: "Error",
@@ -636,12 +813,21 @@ export function DocumentConfigManager() {
                             <TableCell>{element.type}</TableCell>
                             <TableCell>{element.action}</TableCell>
                             <TableCell className="text-right">
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
-                                setActiveSubTypeId(subType.id)
-                                setCurrentDataElement(element)
-                                setEditElementOpen(true)
-                              }}>
-                                <Pencil className="w-4 h-4" />
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => openEditElement(element)}
+                                disabled={isLoading}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => handleDeleteDataElement(element.id)}
+                                disabled={isLoading || element.isDefault}
+                              >
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </TableCell>
                           </TableRow>

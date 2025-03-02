@@ -76,18 +76,61 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
     try {
       set({ isLoading: true, error: null });
       
-      // Fetch app configuration from API
-      const response = await fetch('/api/config');
+      // Instead of loading from a centralized config, load document types directly
+      const docTypesResponse = await fetch('/api/document-types');
       
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
+      if (!docTypesResponse.ok) {
+        throw new Error(`HTTP error ${docTypesResponse.status}`);
       }
       
-      const appConfig = await response.json() as AppConfig;
+      const documentTypes = await docTypesResponse.json();
+      
+      // For each document type, load its sub-types and data elements
+      for (const docType of documentTypes) {
+        // Load sub-types for this document type
+        const subTypesResponse = await fetch(`/api/document-types/${docType.id}/sub-types`);
+        if (subTypesResponse.ok) {
+          docType.subTypes = await subTypesResponse.json();
+        } else {
+          console.warn(`Failed to load sub-types for document type ${docType.id}`);
+          docType.subTypes = [];
+        }
+        
+        // Load data elements for this document type
+        const elementsResponse = await fetch(`/api/document-types/${docType.id}/elements`);
+        if (elementsResponse.ok) {
+          docType.dataElements = await elementsResponse.json();
+        } else {
+          console.warn(`Failed to load elements for document type ${docType.id}`);
+          docType.dataElements = [];
+        }
+        
+        // For each sub-type, load its data elements
+        if (docType.subTypes && docType.subTypes.length > 0) {
+          for (const subType of docType.subTypes) {
+            const subTypeElementsResponse = await fetch(`/api/document-types/${docType.id}/sub-types/${subType.id}/elements`);
+            if (subTypeElementsResponse.ok) {
+              subType.dataElements = await subTypeElementsResponse.json();
+            } else {
+              console.warn(`Failed to load elements for sub-type ${subType.id}`);
+              subType.dataElements = [];
+            }
+          }
+        }
+      }
+      
+      // Create a simple app config with just the document types and default settings
+      const appConfig = {
+        documentTypes,
+        defaultRedactionSettings: {
+          redactPII: true,
+          redactFinancial: true
+        }
+      };
       
       set({
         config: appConfig,
-        activeDocumentTypeId: appConfig.documentTypes[0]?.id || null,
+        activeDocumentTypeId: documentTypes[0]?.id || null,
         isInitialized: true,
         isLoading: false
       });

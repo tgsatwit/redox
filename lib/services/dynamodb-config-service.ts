@@ -6,7 +6,8 @@ import {
   QueryCommand, 
   UpdateCommand, 
   DeleteCommand,
-  ScanCommand
+  ScanCommand,
+  BatchWriteCommand
 } from '@aws-sdk/lib-dynamodb';
 import { createId } from '@paralleldrive/cuid2';
 import { 
@@ -240,7 +241,22 @@ export class DynamoDBConfigService {
         console.log('First document type:', response.Items[0]);
       }
 
-      return (response.Items || []) as DocumentTypeConfig[];
+      const documentTypes = (response.Items || []) as DocumentTypeConfig[];
+      
+      // For each document type, load its sub-types
+      for (const docType of documentTypes) {
+        try {
+          // Load sub-types for this document type (each with their own data elements)
+          const subTypes = await this.getSubTypesByDocumentType(docType.id);
+          docType.subTypes = subTypes;
+        } catch (error) {
+          console.warn(`Error fetching sub-types for document type ${docType.id}:`, error);
+          // Keep the embedded sub-types if any error occurs
+          docType.subTypes = docType.subTypes || [];
+        }
+      }
+
+      return documentTypes;
     } catch (error) {
       console.error('Error fetching document types:', error);
       
@@ -299,7 +315,21 @@ export class DynamoDBConfigService {
         return null;
       }
 
-      return response.Item as DocumentTypeConfig;
+      const docType = response.Item as DocumentTypeConfig;
+      
+      try {
+        // Load sub-types with their self-contained elements
+        if (docType.id) {
+          const subTypes = await this.getSubTypesByDocumentType(docType.id);
+          docType.subTypes = subTypes;
+        }
+      } catch (error) {
+        console.warn(`Error fetching sub-types for document type ${id}:`, error);
+        // Keep the embedded sub-types if any error occurs
+        docType.subTypes = docType.subTypes || [];
+      }
+
+      return docType;
     } catch (error) {
       console.error(`Error fetching document type ${id}:`, error);
       
@@ -354,12 +384,45 @@ export class DynamoDBConfigService {
         return newDocType;
       }
 
+      // Save the document type first
       await docClient.send(
         new PutCommand({
           TableName: DOC_TYPE_TABLE,
           Item: newDocType
         })
       );
+
+      // If there are default data elements, save them separately to the elements table
+      if (newDocType.dataElements && newDocType.dataElements.length > 0) {
+        console.log(`Saving ${newDocType.dataElements.length} default data elements for document type ${newDocType.id}`);
+        
+        const batchWriteItems = newDocType.dataElements.map(element => ({
+          PutRequest: {
+            Item: {
+              ...element,
+              documentTypeId: newDocType.id
+            }
+          }
+        }));
+        
+        // Process batch writes in chunks of 25 (DynamoDB limit)
+        for (let i = 0; i < batchWriteItems.length; i += 25) {
+          const batch = batchWriteItems.slice(i, i + 25);
+          
+          try {
+            await docClient.send(
+              new BatchWriteCommand({
+                RequestItems: {
+                  [DATA_ELEMENT_TABLE]: batch
+                }
+              })
+            );
+          } catch (batchError) {
+            console.error(`Error saving batch of data elements for document type ${newDocType.id}:`, batchError);
+            // We'll continue with the next batch even if this one fails
+          }
+        }
+      }
 
       return newDocType;
     } catch (error) {
@@ -540,6 +603,7 @@ export class DynamoDBConfigService {
         return docType?.subTypes || [];
       }
 
+      // Fetch sub-types with their embedded data elements
       const response = await docClient.send(
         new QueryCommand({
           TableName: SUB_TYPE_TABLE,
@@ -551,6 +615,8 @@ export class DynamoDBConfigService {
         })
       );
 
+      // Return sub-types with their embedded data elements
+      // Each sub-type should be self-contained with its own elements
       return (response.Items || []) as DocumentSubTypeConfig[];
     } catch (error) {
       console.error(`Error fetching sub-types for document type ${documentTypeId}:`, error);
@@ -652,12 +718,47 @@ export class DynamoDBConfigService {
         return newSubType;
       }
 
+      // Save the sub-type first with its embedded elements
       await docClient.send(
         new PutCommand({
           TableName: SUB_TYPE_TABLE,
           Item: newSubType
         })
       );
+
+      // Also save data elements to the elements table for API access
+      // This creates duplicates, but ensures elements can be accessed both ways
+      if (newSubType.dataElements && newSubType.dataElements.length > 0) {
+        console.log(`Saving ${newSubType.dataElements.length} data elements for sub-type ${newSubType.id} to elements table`);
+        
+        const batchWriteItems = newSubType.dataElements.map(element => ({
+          PutRequest: {
+            Item: {
+              ...element,
+              documentTypeId: documentTypeId,
+              subTypeId: newSubType.id
+            }
+          }
+        }));
+        
+        // Process batch writes in chunks of 25 (DynamoDB limit)
+        for (let i = 0; i < batchWriteItems.length; i += 25) {
+          const batch = batchWriteItems.slice(i, i + 25);
+          
+          try {
+            await docClient.send(
+              new BatchWriteCommand({
+                RequestItems: {
+                  [DATA_ELEMENT_TABLE]: batch
+                }
+              })
+            );
+          } catch (batchError) {
+            console.error(`Error saving batch of data elements for sub-type ${newSubType.id}:`, batchError);
+            // We'll continue with the next batch even if this one fails
+          }
+        }
+      }
 
       return newSubType;
     } catch (error) {
@@ -721,6 +822,49 @@ export class DynamoDBConfigService {
         
         saveToLocalStorage(LS_CONFIG_KEY, updatedConfig);
         return;
+      }
+
+      // Special handling if dataElements are being updated
+      if (updates.dataElements) {
+        try {
+          // Get the current sub-type to see what elements might have been removed
+          const currentSubType = await this.getSubType(subTypeId);
+          
+          if (currentSubType) {
+            // Get IDs of elements that should be removed from the elements table
+            const currentElementIds = new Set(currentSubType.dataElements?.map(e => e.id) || []);
+            const updatedElementIds = new Set(updates.dataElements.map(e => e.id));
+            
+            // Find element IDs to remove (in current but not in updates)
+            const elementsToRemove = [...currentElementIds].filter(id => !updatedElementIds.has(id));
+            
+            // Remove elements from the elements table that are no longer in the sub-type
+            for (const elementId of elementsToRemove) {
+              try {
+                await this.deleteDataElement(documentTypeId, elementId, subTypeId);
+              } catch (error) {
+                console.warn(`Error removing element ${elementId} from elements table:`, error);
+              }
+            }
+            
+            // Add/update elements in the elements table
+            for (const element of updates.dataElements) {
+              try {
+                if (currentElementIds.has(element.id)) {
+                  // Update existing element
+                  await this.updateDataElement(documentTypeId, element.id, element, subTypeId);
+                } else {
+                  // Add new element
+                  await this.createDataElement(documentTypeId, element, subTypeId);
+                }
+              } catch (error) {
+                console.warn(`Error saving element ${element.id} to elements table:`, error);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('Error syncing data elements with elements table:', error);
+        }
       }
 
       // Create the update expression dynamically
@@ -808,10 +952,14 @@ export class DynamoDBConfigService {
         return;
       }
 
-      // First delete any data elements connected to this sub-type
-      const dataElements = await this.getDataElementsBySubType(documentTypeId, subTypeId);
-      for (const element of dataElements) {
-        await this.deleteDataElement(documentTypeId, element.id, subTypeId);
+      // First remove any data elements connected to this sub-type from the elements table
+      try {
+        const elements = await this.getDataElementsBySubType(documentTypeId, subTypeId);
+        for (const element of elements) {
+          await this.deleteDataElement(documentTypeId, element.id, subTypeId);
+        }
+      } catch (error) {
+        console.warn(`Error cleaning up elements for sub-type ${subTypeId} from elements table:`, error);
       }
 
       // Then delete the sub-type itself
@@ -861,7 +1009,9 @@ export class DynamoDBConfigService {
       if (this.useFallbackStorage) {
         const config = getFromLocalStorage<AppConfig>(LS_CONFIG_KEY, defaultAppConfig);
         const docType = config.documentTypes.find(dt => dt.id === documentTypeId);
-        return docType?.dataElements || [];
+        
+        // Filter out elements that might have a subTypeId - they belong to sub-types, not the parent
+        return (docType?.dataElements || []).filter(element => !element.subTypeId);
       }
 
       try {
@@ -877,7 +1027,9 @@ export class DynamoDBConfigService {
           })
         );
 
-        return (response.Items || []) as DataElementConfig[];
+        // Filter out elements that have a subTypeId since they belong to sub-types
+        const elements = (response.Items || []) as DataElementConfig[];
+        return elements.filter(element => !element.subTypeId);
       } catch (indexError: any) {
         // If the index doesn't exist, fall back to scanning the table
         if (indexError.name === 'ValidationException' && 
@@ -888,7 +1040,7 @@ export class DynamoDBConfigService {
           const scanResponse = await docClient.send(
             new ScanCommand({
               TableName: DATA_ELEMENT_TABLE,
-              FilterExpression: 'documentTypeId = :documentTypeId',
+              FilterExpression: 'documentTypeId = :documentTypeId AND attribute_not_exists(subTypeId)',
               ExpressionAttributeValues: {
                 ':documentTypeId': documentTypeId
               }
@@ -911,7 +1063,8 @@ export class DynamoDBConfigService {
         
         const config = getFromLocalStorage<AppConfig>(LS_CONFIG_KEY, defaultAppConfig);
         const docType = config.documentTypes.find(dt => dt.id === documentTypeId);
-        return docType?.dataElements || [];
+        // Filter out elements that might have a subTypeId
+        return (docType?.dataElements || []).filter(element => !element.subTypeId);
       }
       
       throw error;

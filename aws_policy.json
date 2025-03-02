@@ -1,0 +1,105 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": [
+				"textract:DetectDocumentText",
+				"textract:AnalyzeDocument",
+				"textract:AnalyzeID",
+				"textract:AnalyzeExpense",
+				"textract:GetDocumentAnalysis",
+				"textract:GetDocumentTextDetection",
+				"textract:GetExpenseAnalysis",
+				"textract:GetLendingAnalysis",
+				"textract:StartDocumentTextDetection",
+				"textract:CreateAdapter",
+				"textract:GetAdapter",
+				"comprehend:DetectDominantLanguage",
+				"comprehend:DetectEntities",
+				"comprehend:DetectSentiment"
+			],
+			"Resource": "*"
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"s3:GetObject",
+				"s3:PutObject",
+				"s3:DeleteObject"
+			],
+			"Resource": "arn:aws:s3:::extract-redact-tool/*"
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"dynamodb:CreateTable",
+				"dynamodb:DeleteTable",
+				"dynamodb:DescribeTable",
+				"dynamodb:ListTables",
+				"dynamodb:UpdateTable",
+				"dynamodb:GetItem",
+				"dynamodb:PutItem",
+				"dynamodb:DeleteItem",
+				"dynamodb:BatchGetItem",
+				"dynamodb:BatchWriteItem",
+				"dynamodb:Query",
+				"dynamodb:Scan",
+				"dynamodb:UpdateItem"
+			],
+			"Resource": [
+				"arn:aws:dynamodb:ap-southeast-2:*:table/document-classification-feedback",
+				"arn:aws:dynamodb:ap-southeast-2:*:table/document-classification-feedback/index/*"
+			]
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"dynamodb:CreateTable",
+				"dynamodb:DescribeTable",
+				"dynamodb:ListTables"
+			],
+			"Resource": "*"
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"dynamodb:GetItem",
+				"dynamodb:PutItem",
+				"dynamodb:UpdateItem",
+				"dynamodb:DeleteItem",
+				"dynamodb:Query",
+				"dynamodb:Scan",
+				"dynamodb:BatchGetItem",
+				"dynamodb:BatchWriteItem"
+			],
+			"Resource": [
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-config",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-doctypes",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-subtypes",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback"
+			]
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"dynamodb:Query",
+				"dynamodb:Scan"
+			],
+			"Resource": [
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-subtypes/index/documentTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-config/index/documentTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-doctypes/index/documentTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements/index/documentTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements/index/subTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples/index/documentTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets/index/documentTypeId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/documentId-index",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/timestamp-index"
+			]
+		}
+	]
+}
