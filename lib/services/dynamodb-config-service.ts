@@ -139,6 +139,10 @@ export class DynamoDBConfigService {
   // Flag to track if we should use fallback storage
   private useFallbackStorage: boolean = false;
 
+  // Cache object to store data elements by subTypeId
+  private subTypeDataElementsCache: Record<string, { timestamp: number, data: DataElementConfig[] }> = {};
+  private CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
+
   /**
    * Get application configuration
    */
@@ -954,7 +958,7 @@ export class DynamoDBConfigService {
 
       // First remove any data elements connected to this sub-type from the elements table
       try {
-        const elements = await this.getDataElementsBySubType(documentTypeId, subTypeId);
+        const elements = await this.getDataElementsBySubType(subTypeId);
         for (const element of elements) {
           await this.deleteDataElement(documentTypeId, element.id, subTypeId);
         }
@@ -1074,69 +1078,120 @@ export class DynamoDBConfigService {
   /**
    * Get all data elements for a specific sub-type
    */
-  async getDataElementsBySubType(documentTypeId: string, subTypeId: string): Promise<DataElementConfig[]> {
-    try {
-      // If using fallback storage, get from local storage
-      if (this.useFallbackStorage) {
-        const config = getFromLocalStorage<AppConfig>(LS_CONFIG_KEY, defaultAppConfig);
-        const docType = config.documentTypes.find(dt => dt.id === documentTypeId);
-        const subType = docType?.subTypes?.find(st => st.id === subTypeId);
-        return subType?.dataElements || [];
-      }
+  async getDataElementsBySubType(subTypeId: string): Promise<DataElementConfig[]> {
+    if (!subTypeId) {
+      return [];
+    }
 
+    // Check cache first
+    const cachedData = this.subTypeDataElementsCache[subTypeId];
+    if (cachedData && (Date.now() - cachedData.timestamp) < this.CACHE_TTL_MS) {
+      return cachedData.data;
+    }
+
+    if (this.useFallbackStorage) {
+      const config = getFromLocalStorage<AppConfig>(LS_CONFIG_KEY, defaultAppConfig);
+      const elements = [];
+      
+      // Find all document types with the matching subType
+      for (const docType of config.documentTypes) {
+        const subType = docType.subTypes?.find(st => st.id === subTypeId);
+        if (subType?.dataElements) {
+          elements.push(...subType.dataElements);
+        }
+      }
+      
+      return elements;
+    }
+
+    try {
+      // Try using the index first if it exists
+      const response = await docClient.send(
+        new QueryCommand({
+          TableName: DATA_ELEMENT_TABLE,
+          IndexName: 'subTypeId-index',
+          KeyConditionExpression: 'subTypeId = :subTypeId',
+          ExpressionAttributeValues: {
+            ':subTypeId': subTypeId
+          }
+        })
+      );
+
+      const results = (response.Items || []) as DataElementConfig[];
+      
+      // Cache the results
+      this.subTypeDataElementsCache[subTypeId] = {
+        timestamp: Date.now(),
+        data: results
+      };
+      
+      return results;
+    } catch (indexError: any) {
+      // If the index doesn't exist or we don't have permission, use an optimized query approach
+      console.warn(`Index issue or permission error, using optimized approach for sub-type data elements: ${indexError.message}`);
+      
       try {
-        // Try using the index first
-        const response = await docClient.send(
-          new QueryCommand({
-            TableName: DATA_ELEMENT_TABLE,
-            IndexName: 'subTypeId-index',
-            KeyConditionExpression: 'subTypeId = :subTypeId',
-            ExpressionAttributeValues: {
-              ':subTypeId': subTypeId
-            }
+        // First try to get the documentTypeId for this subTypeId to optimize our scan
+        const subTypeResponse = await docClient.send(
+          new GetCommand({
+            TableName: 'document-processor-subtypes',
+            Key: { id: subTypeId }
           })
         );
-
-        return (response.Items || []) as DataElementConfig[];
-      } catch (indexError: any) {
-        // If the index doesn't exist or we don't have permission, fall back to scanning the table
-        if ((indexError.name === 'ValidationException' && 
-            indexError.message.includes('specified index') && 
-            indexError.message.includes('does not have')) ||
-            isPermissionError(indexError)) {
-          console.warn(`Index issue or permission error, falling back to table scan for sub-type data elements: ${indexError.message}`);
-          
-          const scanResponse = await docClient.send(
-            new ScanCommand({
+        
+        const subTypeItem = subTypeResponse.Item as DocumentSubTypeConfig;
+        const documentTypeId = subTypeItem?.documentTypeId;
+        
+        // If we found the document type ID, we can filter elements more efficiently
+        if (documentTypeId) {
+          // Try to use the documentTypeId-index first, which is known to exist
+          const queryResponse = await docClient.send(
+            new QueryCommand({
               TableName: DATA_ELEMENT_TABLE,
+              IndexName: 'documentTypeId-index',
+              KeyConditionExpression: 'documentTypeId = :docTypeId',
               FilterExpression: 'subTypeId = :subTypeId',
               ExpressionAttributeValues: {
+                ':docTypeId': documentTypeId,
                 ':subTypeId': subTypeId
               }
             })
           );
           
-          return (scanResponse.Items || []) as DataElementConfig[];
+          const results = (queryResponse.Items || []) as DataElementConfig[];
+          
+          // Cache the results
+          this.subTypeDataElementsCache[subTypeId] = {
+            timestamp: Date.now(),
+            data: results
+          };
+          
+          return results;
         }
-        
-        // If it's a different error, rethrow it
-        throw indexError;
-      }
-    } catch (error) {
-      console.error(`Error fetching data elements for sub-type ${subTypeId}:`, error);
-      
-      // If permission error, use local storage fallback
-      if (isPermissionError(error)) {
-        console.log('Using local storage fallback for data elements by sub-type due to permission issues');
-        this.useFallbackStorage = true;
-        
-        const config = getFromLocalStorage<AppConfig>(LS_CONFIG_KEY, defaultAppConfig);
-        const docType = config.documentTypes.find(dt => dt.id === documentTypeId);
-        const subType = docType?.subTypes?.find(st => st.id === subTypeId);
-        return subType?.dataElements || [];
+      } catch (subTypeError) {
+        console.warn(`Error getting subType details: ${(subTypeError as Error).message}, falling back to full scan`);
       }
       
-      throw error;
+      // If all else fails, fall back to the original scan approach
+      const scanResponse = await docClient.send(
+        new ScanCommand({
+          TableName: DATA_ELEMENT_TABLE,
+          FilterExpression: 'subTypeId = :subTypeId',
+          ExpressionAttributeValues: {
+            ':subTypeId': subTypeId
+          }
+        })
+      );
+      
+      const results = (scanResponse.Items || []) as DataElementConfig[];
+      
+      // Cache the results
+      this.subTypeDataElementsCache[subTypeId] = {
+        timestamp: Date.now(),
+        data: results
+      };
+      
+      return results;
     }
   }
 

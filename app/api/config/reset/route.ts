@@ -143,7 +143,7 @@ export async function POST() {
           if (docType.subTypes && docType.subTypes.length > 0) {
             for (const subType of docType.subTypes) {
               const { result: subTypeElements, error: elementsError, isPermissionError: elementsPermissionError, isIndexError: elementsIndexError } = 
-                await safeExecute(() => configService.getDataElementsBySubType(docType.id, subType.id), []);
+                await safeExecute(() => configService.getDataElementsBySubType(subType.id), []);
               
               if (elementsPermissionError) {
                 hasPermissionIssues = true;

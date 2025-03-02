@@ -25,8 +25,13 @@ export async function GET() {
         // For each sub-type, load its elements
         if (docType.subTypes) {
           for (const subType of docType.subTypes) {
-            const subTypeElements = await configService.getDataElementsBySubType(docType.id, subType.id);
-            subType.dataElements = subTypeElements;
+            // Load data elements for sub-type
+            try {
+              const subTypeElements = await configService.getDataElementsBySubType(subType.id);
+              subType.dataElements = subTypeElements;
+            } catch (error) {
+              console.error('Error loading data elements for sub-type:', error);
+            }
           }
         }
         

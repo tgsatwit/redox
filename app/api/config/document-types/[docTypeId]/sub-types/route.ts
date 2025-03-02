@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     
     // For each sub-type, load its elements
     for (const subType of subTypes) {
-      const elements = await configService.getDataElementsBySubType(docTypeId, subType.id);
+      const elements = await configService.getDataElementsBySubType(subType.id);
       subType.dataElements = elements;
     }
     

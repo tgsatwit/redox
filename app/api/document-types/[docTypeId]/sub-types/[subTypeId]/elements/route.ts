@@ -20,7 +20,7 @@ export async function GET(
       );
     }
     
-    const elements = await configService.getDataElementsBySubType(docTypeId, subTypeId);
+    const elements = await configService.getDataElementsBySubType(subTypeId);
     return NextResponse.json(elements);
   } catch (error: any) {
     console.error('Error fetching sub-type data elements:', error);
