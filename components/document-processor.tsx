@@ -288,72 +288,88 @@ export function DocumentProcessor() {
   }, [activeDocumentTypeId]);
 
   const handleFileUpload = async (uploadedFile: File | null) => {
-    if (!uploadedFile) {
-      setFile(null);
-      return;
-    }
-    
-    // Set file state and reset other states
+    // Reset all states
+    setProcessError(null);
+    setUploadError(null);
     setFile(uploadedFile);
     setImageUrl(null);
-    setExtractedText("");
+    setDocumentData(null);
+    setRedactedImageUrl(null);
+    setExtractedText(null);
     setExtractedElements([]);
-    setActiveTab("Document");
+    setSelectedElements([]);
+    setActiveTab("original");
+    setPdfViewerError(null);
     setClassificationResult(null);
     setFeedbackSubmitted(false);
     
-    // Generate a data URL to display the document
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setImageUrl(dataUrl);
-    };
-    reader.readAsDataURL(uploadedFile);
-    
-    // Run auto-classification immediately if enabled
-    if (useAutoClassification) {
-      console.log("Auto-classification triggered for file:", uploadedFile.name);
-      // Small delay to ensure file state is fully set
-      setTimeout(async () => {
-        // Check if classification is already in progress
-        if (!isClassifying) {
-          try {
-            await handleClassifyDocument();
-          } catch (error) {
-            console.error("Auto-classification failed:", error);
-          }
-        }
-      }, 100);
+    if (!uploadedFile) {
+      return;
     }
-    
+
     try {
-      // For PDF documents, we should check if it's multipage
+      setIsUploading(true);
+
+      // Create object URL for display
+      const objectUrl = URL.createObjectURL(uploadedFile);
+      setImageUrl(objectUrl);
+
+      // For PDF documents, check if it's multipage
       if (uploadedFile.type === 'application/pdf') {
-        // Check if this is a multipage PDF
-        let pageCount = 1;
         try {
-          pageCount = await getPdfPageCount(uploadedFile);
+          const pageCount = await getPdfPageCount(uploadedFile);
+          
+          if (pageCount > 10) {
+            // For large PDFs, automatically use page-by-page processing
+            toast({
+              title: "Large PDF detected",
+              description: `This PDF has ${pageCount} pages. It will be processed page by page for best results.`,
+              duration: 5000
+            });
+            
+            // Wait for the file to be set before triggering page-by-page processing
+            setTimeout(() => {
+              handleProcessPageByPage();
+            }, 500);
+            return;
+          }
         } catch (e) {
           console.warn('Error getting PDF page count:', e);
         }
-        
-        if (pageCount > 10) {
-          // For large PDFs, automatically use page-by-page processing
-          toast({
-            title: "Large PDF detected",
-            description: `This PDF has ${pageCount} pages. It will be processed page by page for best results.`,
-            duration: 5000
-          });
+      }
+
+      // If auto-classify is enabled, try to classify the document
+      if (useAutoClassification) {
+        try {
+          setIsClassifying(true);
+          const result = await classifyDocument(uploadedFile);
+          setClassificationResult(result);
           
-          // Wait for the file to be set before triggering page-by-page processing
-          setTimeout(() => {
-            handleProcessPageByPage();
-          }, 500);
-          return;
+          // If classification is successful with high confidence, set the document type
+          if (result.confidence > 0.8 && result.documentType !== "Unknown") {
+            const matchingDocType = config.documentTypes.find(
+              dt => dt.name.toLowerCase() === result.documentType.toLowerCase()
+            );
+            if (matchingDocType) {
+              setActiveDocumentType(matchingDocType.id);
+            }
+          }
+        } catch (error) {
+          console.error("Auto-classification error:", error);
+          toast({
+            title: "Auto-classification failed",
+            description: "The document could not be automatically classified.",
+            variant: "destructive"
+          });
+        } finally {
+          setIsClassifying(false);
         }
       }
     } catch (error) {
-      console.error('Error checking PDF page count:', error);
+      console.error("Error uploading file:", error);
+      setUploadError(`Error uploading file: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -680,7 +696,8 @@ export function DocumentProcessor() {
         file.name, // Using filename as document ID
         classificationResult,
         verified ? null : docType.name,
-        'manual'
+        'manual',
+        selectedSubTypeId ? activeDocType?.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null : null
       );
       
       // Process the document
@@ -1336,31 +1353,78 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
     }
   };
 
+  // Updated feedback submission function that includes sub-type information
+  const submitClassificationFeedbackWithSubType = async () => {
+    if (!file || !activeDocumentTypeId) return;
+    
+    try {
+      // Show processing state
+      toast({
+        title: "Submitting feedback...",
+        description: "Please wait while we process your feedback.",
+        variant: "default"
+      });
+      
+      const selectedDocType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId);
+      if (!selectedDocType) {
+        throw new Error("Selected document type not found");
+      }
+      
+      // Get the selected sub-type name if any
+      const selectedSubTypeName = selectedSubTypeId && activeDocType?.subTypes 
+        ? activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.name || null
+        : null;
+      
+      // Log what we're about to send for easier debugging
+      console.log("Submitting classification feedback:", {
+        documentId: file?.name || 'unknown-document',
+        originalClassification: classificationResult,
+        correctedDocumentType: selectedDocType.name,
+        documentSubType: selectedSubTypeName,
+        feedbackSource: 'manual'
+      });
+      
+      await submitClassificationFeedback(
+        file?.name || 'unknown-document',
+        classificationResult,
+        selectedDocType.name,
+        'manual',
+        selectedSubTypeName
+      );
+      
+      setFeedbackSubmitted(true);
+      
+      toast({
+        title: "Feedback submitted",
+        description: `This will help improve classification for future documents.`,
+        variant: "default"
+      });
+    } catch (error) {
+      console.error('Error submitting feedback:', error);
+      toast({
+        title: "Feedback submission failed",
+        description: (error as Error).message || "An error occurred while submitting feedback.",
+        variant: "destructive"
+      });
+    }
+  };
+
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
         <div className="space-y-6">
           <Card className="p-4">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-medium">Upload Document</h2>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1"
-                onClick={() => router.push('/config')}
-              >
-                <Settings className="h-4 w-4" />
-                Configure Document Types
-              </Button>
+              <h2 className="text-2xl font-bold">Process Documents</h2>
             </div>
             
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <Checkbox 
+                  <Switch 
                     id="auto-classify" 
                     checked={useAutoClassification}
-                    onCheckedChange={(checked) => setUseAutoClassification(!!checked)}
+                    onCheckedChange={(checked) => setUseAutoClassification(checked)}
                   />
                   <label 
                     htmlFor="auto-classify" 
@@ -1377,16 +1441,52 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 )}
               </div>
               
-              {(!useAutoClassification || (classificationResult && classificationResult.confidence < 0.8)) && (
+              {/* Always show document type selector if classification is unknown or low confidence,
+                  or if user wants to override the classification */}
+              {(!useAutoClassification || !classificationResult || 
+                classificationResult.documentType === "Unknown" || 
+                classificationResult.confidence < 0.8 || 
+                (classificationResult && activeDocumentTypeId && 
+                 activeDocType?.name !== classificationResult.documentType)) && (
                 <div>
-                  <label className="text-sm font-medium mb-1 block">
-                    Document Type
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-medium block">
+                      Document Type
+                    </label>
+                    
+                    {classificationResult && classificationResult.documentType !== "Unknown" && 
+                     classificationResult.confidence >= 0.8 && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          // Find the document type ID matching the classification result
+                          const matchingDocType = config.documentTypes.find(
+                            dt => dt.name.toLowerCase() === classificationResult.documentType.toLowerCase()
+                          );
+                          if (matchingDocType) {
+                            setActiveDocumentType(matchingDocType.id);
+                            setSelectedSubTypeId(null);
+                          }
+                        }}
+                      >
+                        Use Suggested Type
+                      </Button>
+                    )}
+                  </div>
+                  
                   <div className="flex gap-2">
                     <div className="flex-1">
                       <Select
                         value={activeDocumentTypeId || ''}
-                        onValueChange={(value) => setActiveDocumentType(value)}
+                        onValueChange={(value) => {
+                          setActiveDocumentType(value);
+                          // Reset sub-type when document type changes
+                          setSelectedSubTypeId(null);
+                          // Reset feedback status when selection changes
+                          setFeedbackSubmitted(false);
+                        }}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="Select document type" />
@@ -1407,70 +1507,11 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                       </Select>
                     </div>
                     
-                    {classificationResult && activeDocumentTypeId && (
+                    {file && classificationResult && activeDocumentTypeId && (
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        onClick={async () => {
-                          try {
-                            // Show processing state
-                            toast({
-                              title: "Submitting feedback...",
-                              description: "Please wait while we process your feedback.",
-                              variant: "default"
-                            });
-                            
-                            const selectedDocType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId);
-                            if (!selectedDocType) {
-                              throw new Error("Selected document type not found");
-                            }
-                            
-                            // Log what we're about to send for easier debugging
-                            console.log("Submitting classification feedback:", {
-                              documentId: file?.name || 'unknown-document',
-                              originalClassification: classificationResult,
-                              correctedDocumentType: selectedDocType.name,
-                              feedbackSource: 'manual'
-                            });
-                            
-                            const response = await fetch('/api/classification-feedback', {
-                              method: 'POST',
-                              headers: {
-                                'Content-Type': 'application/json',
-                              },
-                              body: JSON.stringify({
-                                documentId: file?.name || 'unknown-document',
-                                originalClassification: classificationResult,
-                                correctedDocumentType: selectedDocType.name,
-                                feedbackSource: 'manual',
-                                timestamp: Date.now()
-                              })
-                            });
-                            
-                            if (!response.ok) {
-                              const errorData = await response.json();
-                              throw new Error(errorData.error || `HTTP error ${response.status}`);
-                            }
-                            
-                            const data = await response.json();
-                            console.log("Feedback API response:", data);
-                            
-                            setFeedbackSubmitted(true);
-                            
-                            toast({
-                              title: "Feedback submitted",
-                              description: `This will help improve classification for future documents.`,
-                              variant: "default"
-                            });
-                          } catch (error) {
-                            console.error('Error submitting feedback:', error);
-                            toast({
-                              title: "Feedback submission failed",
-                              description: (error as Error).message || "An error occurred while submitting feedback.",
-                              variant: "destructive"
-                            });
-                          }
-                        }}
+                        onClick={submitClassificationFeedbackWithSubType}
                         disabled={feedbackSubmitted}
                       >
                         {feedbackSubmitted ? (
@@ -1492,7 +1533,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                 </div>
               )}
 
-              {/* Add Sub-Type Selection */}
+              {/* Show Sub-Type Selection when a document type is selected and it has sub-types */}
               {activeDocumentTypeId && activeDocType?.subTypes && activeDocType.subTypes.length > 0 && (
                 <div className="mt-2">
                   <label className="text-sm font-medium mb-1 block">
@@ -1500,7 +1541,11 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                   </label>
                   <Select
                     value={selectedSubTypeId || 'none'}
-                    onValueChange={(value) => setSelectedSubTypeId(value === 'none' ? null : value)}
+                    onValueChange={(value) => {
+                      setSelectedSubTypeId(value === 'none' ? null : value);
+                      // Reset feedback status when selection changes
+                      setFeedbackSubmitted(false);
+                    }}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select sub-type (optional)" />
@@ -1762,402 +1807,415 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
           )}
         </div>
 
-        <div className="space-y-6">
-          {isProcessing ? (
-            <Card className="p-6 flex items-center justify-center min-h-[200px]">
-              <div className="flex flex-col items-center gap-2">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p>Processing document...</p>
+        {/* Add processing options for PDFs */}
+        {file && file.type === "application/pdf" && !isProcessing && !documentData && (
+          <Card className="p-4 border border-muted-foreground/20">
+            <h2 className="text-lg font-semibold mb-3">PDF Processing Options</h2>
+            
+            {/* PDF rendering guidance for users */}
+            {(pdfViewerError) && (
+              <div className="mb-4 p-3 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-sm">
+                <p className="font-medium">PDF rendering issue detected</p>
+                <p className="text-xs mt-1">We recommend using "Process PDF Page by Page" below</p>
               </div>
-            </Card>
-          ) : documentData ? (
-            <>
-              <Card className="p-4">
-                <h2 className="text-xl font-semibold mb-2">Document Information</h2>
-                <div className="space-y-2">
-                  <p>
-                    <strong>Document Type:</strong> {activeDocType?.name || documentData.documentType}
-                  </p>
-                  <p>
-                    <strong>Confidence:</strong> {documentData.confidence}%
-                  </p>
-                </div>
-              </Card>
-
-              <DataExtractor
-                extractedFields={documentData.extractedFields}
-                fieldsToRedact={fieldsToRedact}
-                onToggleField={toggleFieldRedaction}
-              />
-
-              <RedactionControls
-                onRedact={handleRedaction}
-                onDownload={handleDownload}
-                canRedact={documentData.extractedFields.length > 0}
-                canDownload={!!redactedImageUrl}
-              />
-            </>
-          ) : null}
-
-          {/* Add page-by-page processing button for PDFs */}
-          {file && file.type === "application/pdf" && !isProcessing && !documentData && (
-            <Card className="p-4 border border-muted-foreground/20">
-              <h2 className="text-lg font-semibold mb-3">PDF Processing Options</h2>
-              
-              {/* PDF rendering guidance for users */}
-              {(pdfViewerError) && (
-                <div className="mb-4 p-3 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-sm">
-                  <p className="font-medium">PDF rendering issue detected</p>
-                  <p className="text-xs mt-1">We recommend using "Process PDF Page by Page" below</p>
-                </div>
-              )}
-              
-              {/* Classification results, if available */}
-              {classificationResult && (
-                <div className="mb-4 p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm">
-                  <p className="font-medium">Document Classification</p>
-                  
-                  <p className="mt-1">
-                    <span className="font-semibold">Document Type:</span> {classificationResult.documentType}
-                  </p>
-                  
-                  <p className="mt-1">
-                    <span className="font-semibold">Confidence:</span> {(classificationResult.confidence * 100).toFixed(1)}%
-                  </p>
-                  
-                  {classificationResult.modelId && (
-                    <p className="mt-1 text-xs">
-                      <span className="font-semibold">Model ID:</span> {classificationResult.modelId}
-                    </p>
-                  )}
-                  
-                  <p className="mt-3 text-xs italic border-t border-blue-200 pt-2">
-                    If this classification is incorrect, select the correct document type and click "Submit Feedback"
-                    to help improve future classifications.
-                  </p>
-                </div>
-              )}
-              
-              <div className="space-y-3">
-                <Button 
-                  onClick={handleProcessDocument}
-                  disabled={isProcessing}
-                  className="w-full flex justify-start items-center"
-                  size="lg"
-                >
-                  <FileText className="mr-3 h-5 w-5" />
-                  <div className="text-left">
-                    <div>Process as {activeDocType?.name || 'Document'}</div>
-                    <div className="text-xs font-normal opacity-80">Standard processing</div>
-                  </div>
-                </Button>
+            )}
+            
+            {/* Classification results, if available */}
+            {classificationResult && (
+              <div className="mb-4 p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm">
+                <p className="font-medium">Document Classification</p>
                 
-                <Button 
-                  onClick={handleProcessPageByPage}
-                  disabled={isProcessingPageByPage}
-                  className="w-full flex justify-start items-center"
-                  variant={(pdfViewerError) ? "default" : "secondary"}
-                  size="lg"
-                >
-                  <FileSearch className="mr-3 h-5 w-5" />
-                  <div className="text-left">
-                    <div>Process PDF Page by Page</div>
-                    <div className="text-xs font-normal opacity-80">Recommended for complex PDFs</div>
-                  </div>
-                </Button>
+                <p className="mt-1">
+                  <span className="font-semibold">Document Type:</span> {classificationResult.documentType}
+                </p>
                 
-                <Button 
-                  onClick={handleClassifyDocument}
-                  disabled={isProcessing || !file || isClassifying}
-                  className="w-full flex justify-start items-center"
-                  variant="outline"
-                  size="lg"
-                >
-                  <Loader2 className={`mr-3 h-5 w-5 ${isClassifying ? 'animate-spin' : ''}`} />
-                  <div className="text-left">
-                    <div>{isClassifying ? 'Classifying...' : 'Classify Document'}</div>
-                    <div className="text-xs font-normal opacity-80">Analyze document type with AWS Comprehend</div>
-                  </div>
-                </Button>
+                <p className="mt-1">
+                  <span className="font-semibold">Confidence:</span> {(classificationResult.confidence * 100).toFixed(1)}%
+                </p>
                 
-                <details className="text-sm mt-2">
-                  <summary className="cursor-pointer font-medium">Advanced Options</summary>
-                  <div className="grid grid-cols-2 gap-3 mt-3 pt-2 border-t">
-                    <Button 
-                      onClick={handleTestPageSplitting}
-                      disabled={isProcessing}
-                      className="flex justify-center items-center gap-2"
-                      variant="outline"
-                      size="sm"
-                    >
-                      <FileText className="h-4 w-4" />
-                      Test Page Splitting
-                    </Button>
-
-                    <Button 
-                      onClick={handleDiagnosticTest}
-                      disabled={isProcessing}
-                      className="flex justify-center items-center gap-2"
-                      variant="outline"
-                      size="sm"
-                    >
-                      <Wrench className="h-4 w-4" />
-                      Run Diagnostic
-                    </Button>
-                  </div>
-                </details>
+                {classificationResult.modelId && (
+                  <p className="mt-1 text-xs">
+                    <span className="font-semibold">Model ID:</span> {classificationResult.modelId}
+                  </p>
+                )}
+                
+                <p className="mt-3 text-xs italic border-t border-blue-200 pt-2">
+                  If this classification is incorrect, select the correct document type and click "Submit Feedback"
+                  to help improve future classifications.
+                </p>
               </div>
-            </Card>
-          )}
-
-          {/* Add processing options for non-PDF files */}
-          {file && file.type !== "application/pdf" && !isProcessing && !documentData && isFileFormatSupported() && (
-            <Card className="p-4 border border-muted-foreground/20">
-              <h2 className="text-lg font-semibold mb-3">Document Processing Options</h2>
-              
-              {/* Replace classification results section */}
-              {classificationResult && (
-                <div className="mb-4 p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm">
-                  <p className="font-medium">Document Classification</p>
-                  
-                  <p className="mt-1">
-                    <span className="font-semibold">Document Type:</span> {classificationResult.documentType}
-                  </p>
-                  
-                  <p className="mt-1">
-                    <span className="font-semibold">Confidence:</span> {(classificationResult.confidence * 100).toFixed(1)}%
-                  </p>
-                  
-                  {classificationResult.modelId && (
-                    <p className="mt-1 text-xs">
-                      <span className="font-semibold">Model ID:</span> {classificationResult.modelId}
-                    </p>
-                  )}
+            )}
+            
+            <div className="space-y-3">
+              <Button 
+                onClick={handleProcessDocument}
+                disabled={isProcessing}
+                className="w-full flex justify-start items-center"
+                size="lg"
+              >
+                <FileText className="mr-3 h-5 w-5" />
+                <div className="text-left">
+                  <div>Process as {activeDocType?.name || 'Document'}</div>
+                  <div className="text-xs font-normal opacity-80">Standard processing</div>
                 </div>
-              )}
+              </Button>
               
-              <div className="space-y-3">
-                <Button 
-                  onClick={handleProcessDocument}
-                  disabled={isProcessing}
-                  className="w-full flex justify-start items-center"
-                  size="lg"
-                >
-                  <FileText className="mr-3 h-5 w-5" />
-                  <div className="text-left">
-                    <div>Process as {activeDocType?.name || 'Document'}</div>
-                    <div className="text-xs font-normal opacity-80">Standard processing</div>
-                  </div>
-                </Button>
-                
-                <Button 
-                  onClick={handleClassifyDocument}
-                  disabled={isProcessing || !file || isClassifying}
-                  className="w-full flex justify-start items-center"
-                  variant="outline"
-                  size="lg"
-                >
-                  <Loader2 className={`mr-3 h-5 w-5 ${isClassifying ? 'animate-spin' : ''}`} />
-                  <div className="text-left">
-                    <div>{isClassifying ? 'Classifying...' : 'Classify Document'}</div>
-                    <div className="text-xs font-normal opacity-80">Analyze document type with AWS Comprehend</div>
-                  </div>
-                </Button>
-              </div>
-            </Card>
-          )}
+              <Button 
+                onClick={handleProcessPageByPage}
+                disabled={isProcessingPageByPage}
+                className="w-full flex justify-start items-center"
+                variant={(pdfViewerError) ? "default" : "secondary"}
+                size="lg"
+              >
+                <FileSearch className="mr-3 h-5 w-5" />
+                <div className="text-left">
+                  <div>Process PDF Page by Page</div>
+                  <div className="text-xs font-normal opacity-80">Recommended for complex PDFs</div>
+                </div>
+              </Button>
+              
+              <Button 
+                onClick={handleClassifyDocument}
+                disabled={isProcessing || !file || isClassifying}
+                className="w-full flex justify-start items-center"
+                variant="outline"
+                size="lg"
+              >
+                <Loader2 className={`mr-3 h-5 w-5 ${isClassifying ? 'animate-spin' : ''}`} />
+                <div className="text-left">
+                  <div>{isClassifying ? 'Classifying...' : 'Classify Document'}</div>
+                  <div className="text-xs font-normal opacity-80">Analyze document type with AWS Comprehend</div>
+                </div>
+              </Button>
+              
+              <details className="text-sm mt-2">
+                <summary className="cursor-pointer font-medium">Advanced Options</summary>
+                <div className="grid grid-cols-2 gap-3 mt-3 pt-2 border-t">
+                  <Button 
+                    onClick={handleTestPageSplitting}
+                    disabled={isProcessing}
+                    className="flex justify-center items-center gap-2"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Test Page Splitting
+                  </Button>
 
-          {/* Processing status and progress bar */}
-          {isProcessingPageByPage && (
-            <div className="mt-4 space-y-2">
-              <div className="text-sm text-muted-foreground">{processingStatus}</div>
-              <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-                <div 
-                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                  style={{ width: `${processingProgress}%` }}
-                ></div>
-              </div>
+                  <Button 
+                    onClick={handleDiagnosticTest}
+                    disabled={isProcessing}
+                    className="flex justify-center items-center gap-2"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Wrench className="h-4 w-4" />
+                    Run Diagnostic
+                  </Button>
+                </div>
+              </details>
             </div>
-          )}
-          
-          {/* Extracted elements for redaction */}
-          {extractedElements.length > 0 && (
-            <Card className="mt-6 p-4">
-              <h3 className="text-lg font-medium mb-2">Extracted Elements for Redaction</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Select elements to redact. {selectedElements.length} elements selected.
-              </p>
-              
-              {activeDocType && (
-                <div className="mb-4 flex flex-wrap gap-2">
-                  {getConfiguredDataElements()
-                    .filter(de => de.action === 'Redact' || de.action === 'ExtractAndRedact')
-                    .map(de => (
-                      <Badge key={de.id} variant="outline" className="px-2 py-1 text-xs">
-                        {de.name} ({de.category})
-                      </Badge>
-                    ))}
+          </Card>
+        )}
+
+        {/* Add processing options for non-PDF files */}
+        {file && file.type !== "application/pdf" && !isProcessing && !documentData && isFileFormatSupported() && (
+          <Card className="p-4 border border-muted-foreground/20">
+            <h2 className="text-lg font-semibold mb-3">Document Processing Options</h2>
+            
+            {/* Replace classification results section */}
+            {classificationResult && (
+              <div className="mb-4 p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm">
+                <p className="font-medium">Document Classification</p>
+                
+                <p className="mt-1">
+                  <span className="font-semibold">Document Type:</span> {classificationResult.documentType}
+                </p>
+                
+                <p className="mt-1">
+                  <span className="font-semibold">Confidence:</span> {(classificationResult.confidence * 100).toFixed(1)}%
+                </p>
+                
+                {classificationResult.modelId && (
+                  <p className="mt-1 text-xs">
+                    <span className="font-semibold">Model ID:</span> {classificationResult.modelId}
+                  </p>
+                )}
+              </div>
+            )}
+            
+            <div className="space-y-3">
+              <Button 
+                onClick={handleProcessDocument}
+                disabled={isProcessing}
+                className="w-full flex justify-start items-center"
+                size="lg"
+              >
+                <FileText className="mr-3 h-5 w-5" />
+                <div className="text-left">
+                  <div>Process as {activeDocType?.name || 'Document'}</div>
+                  <div className="text-xs font-normal opacity-80">Standard processing</div>
                 </div>
-              )}
+              </Button>
               
-              <Tabs defaultValue="list" className="w-full">
-                <TabsList>
-                  <TabsTrigger value="list">List View</TabsTrigger>
-                  <TabsTrigger value="category">By Category</TabsTrigger>
-                  <TabsTrigger value="configuration">By Configuration</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="list" className="mt-4">
-                  <div className="max-h-[450px] overflow-y-auto space-y-2">
-                    {extractedElements.map(element => (
-                      <div 
-                        key={element.id}
-                        className={`p-3 border rounded flex flex-col hover:bg-gray-50 transition-colors ${
-                          selectedElements.includes(element.id) 
-                            ? 'border-blue-500 bg-blue-50 shadow-sm' 
-                            : (element as ExtendedRedactionElement).missing
-                              ? 'border-gray-200 bg-gray-50 opacity-75'
-                              : 'border-gray-200'
-                        } ${(element as ExtendedRedactionElement).isConfigured ? 'border-l-4 border-l-blue-400' : ''}`}
-                      >
-                        <div className="flex items-center space-x-3 cursor-pointer" onClick={() => toggleElementSelection(element.id)}>
-                          <Checkbox
-                            checked={selectedElements.includes(element.id)}
-                            onCheckedChange={() => toggleElementSelection(element.id)}
-                            className={`h-5 w-5 ${selectedElements.includes(element.id) ? 'bg-blue-600 border-blue-600' : ''}`}
-                            disabled={(element as ExtendedRedactionElement).missing}
-                          />
-                          <div className="flex-1">
-                            <div className={`font-medium truncate max-w-md ${selectedElements.includes(element.id) ? 'text-blue-700' : ''}`}>
-                              {element.text}
-                            </div>
-                            <div className="text-xs flex items-center gap-2 mt-1">
-                              <Badge variant="secondary" className="text-xs">
-                                {(element as ExtendedRedactionElement).type === '' 
-                                  ? 'None' 
-                                  : (element as ExtendedRedactionElement).type || 'Text'}
+              <Button 
+                onClick={handleClassifyDocument}
+                disabled={isProcessing || !file || isClassifying}
+                className="w-full flex justify-start items-center"
+                variant="outline"
+                size="lg"
+              >
+                <Loader2 className={`mr-3 h-5 w-5 ${isClassifying ? 'animate-spin' : ''}`} />
+                <div className="text-left">
+                  <div>{isClassifying ? 'Classifying...' : 'Classify Document'}</div>
+                  <div className="text-xs font-normal opacity-80">Analyze document type with AWS Comprehend</div>
+                </div>
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Processing status and progress bar */}
+        {isProcessingPageByPage && (
+          <div className="mt-4 space-y-2">
+            <div className="text-sm text-muted-foreground">{processingStatus}</div>
+            <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+              <div 
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                style={{ width: `${processingProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+        
+        {/* Extracted elements for redaction */}
+        {extractedElements.length > 0 && (
+          <Card className="mt-6 p-4">
+            <h3 className="text-lg font-medium mb-2">Extracted Elements for Redaction</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Select elements to redact. {selectedElements.length} elements selected.
+            </p>
+            
+            {activeDocType && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {getConfiguredDataElements()
+                  .filter(de => de.action === 'Redact' || de.action === 'ExtractAndRedact')
+                  .map(de => (
+                    <Badge key={de.id} variant="outline" className="px-2 py-1 text-xs">
+                      {de.name} ({de.category})
+                    </Badge>
+                  ))}
+              </div>
+            )}
+            
+            <Tabs defaultValue="list" className="w-full">
+              <TabsList>
+                <TabsTrigger value="list">List View</TabsTrigger>
+                <TabsTrigger value="category">By Category</TabsTrigger>
+                <TabsTrigger value="configuration">By Configuration</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="list" className="mt-4">
+                <div className="max-h-[450px] overflow-y-auto space-y-2">
+                  {extractedElements.map(element => (
+                    <div 
+                      key={element.id}
+                      className={`p-3 border rounded flex flex-col hover:bg-gray-50 transition-colors ${
+                        selectedElements.includes(element.id) 
+                          ? 'border-blue-500 bg-blue-50 shadow-sm' 
+                          : (element as ExtendedRedactionElement).missing
+                            ? 'border-gray-200 bg-gray-50 opacity-75'
+                            : 'border-gray-200'
+                      } ${(element as ExtendedRedactionElement).isConfigured ? 'border-l-4 border-l-blue-400' : ''}`}
+                    >
+                      <div className="flex items-center space-x-3 cursor-pointer" onClick={() => toggleElementSelection(element.id)}>
+                        <Checkbox
+                          checked={selectedElements.includes(element.id)}
+                          onCheckedChange={() => toggleElementSelection(element.id)}
+                          className={`h-5 w-5 ${selectedElements.includes(element.id) ? 'bg-blue-600 border-blue-600' : ''}`}
+                          disabled={(element as ExtendedRedactionElement).missing}
+                        />
+                        <div className="flex-1">
+                          <div className={`font-medium truncate max-w-md ${selectedElements.includes(element.id) ? 'text-blue-700' : ''}`}>
+                            {element.text}
+                          </div>
+                          <div className="text-xs flex items-center gap-2 mt-1">
+                            <Badge variant="secondary" className="text-xs">
+                              {(element as ExtendedRedactionElement).type === '' 
+                                ? 'None' 
+                                : (element as ExtendedRedactionElement).type || 'Text'}
+                            </Badge>
+                            {(element as ExtendedRedactionElement).isConfigured && (
+                              <Badge variant="outline" className="text-xs bg-blue-50">
+                                Configured Element: {(element as ExtendedRedactionElement).label}
                               </Badge>
-                              {(element as ExtendedRedactionElement).isConfigured && (
-                                <Badge variant="outline" className="text-xs bg-blue-50">
-                                  Configured Element: {(element as ExtendedRedactionElement).label}
-                                </Badge>
-                              )}
-                              <span className="text-muted-foreground">
-                                {(element as ExtendedRedactionElement).missing 
-                                  ? 'Not found in document'
-                                  : `Page: ${element.pageIndex + 1} | Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
-                                }
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Add controls for changing element type */}
-                        {selectedElements.includes(element.id) && activeDocType && !(element as ExtendedRedactionElement).missing && (
-                          <div className="mt-2 pt-2 border-t border-dashed flex items-center gap-2">
-                            <div className="text-xs font-medium">Change type:</div>
-                            <Select
-                              value={
-                                (element as ExtendedRedactionElement).type === '' 
-                                  ? 'none' 
-                                  : (element as ExtendedRedactionElement).type || 'Text'
+                            )}
+                            <span className="text-muted-foreground">
+                              {(element as ExtendedRedactionElement).missing 
+                                ? 'Not found in document'
+                                : `Page: ${element.pageIndex + 1} | Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
                               }
-                              onValueChange={(value) => {
-                                // Update the element type
-                                setExtractedElements(prev => 
-                                  prev.map(el => 
-                                    el.id === element.id 
-                                      ? {
-                                          ...el, 
-                                          type: value === 'none' ? '' : value, 
-                                          label: value === 'none' ? '' : value
-                                        } 
-                                      : el
-                                  )
-                                );
-                                
-                                toast({
-                                  title: "Element type changed",
-                                  description: `Changed to: ${value === 'none' ? 'None' : value}`,
-                                  variant: "default"
-                                });
-                              }}
-                            >
-                              <SelectTrigger className="h-7 text-xs">
-                                <SelectValue placeholder="Select type" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">None</SelectItem>
-                                {getConfiguredDataElements().map((de) => (
-                                  <SelectItem key={de.id} value={de.type || de.name}>
-                                    {de.name}
-                                  </SelectItem>
-                                ))}
-                                <SelectItem value="Text">Generic Text</SelectItem>
-                              </SelectContent>
-                            </Select>
+                            </span>
                           </div>
-                        )}
-                        
-                        {/* Show bounding box information if available */}
-                        {element.boundingBox && !(element as ExtendedRedactionElement).missing && (
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            <div className="flex justify-between">
-                              <span>Position: {
-                                ((box) => {
-                                  return 'Left' in box 
-                                    ? (box.Left * 100).toFixed(1) + '%'
-                                    : (box.x * 100).toFixed(1) + '%';
-                                })(element.boundingBox)
-                              }, {
-                                ((box) => {
-                                  return 'Top' in box 
-                                    ? (box.Top * 100).toFixed(1) + '%'
-                                    : (box.y * 100).toFixed(1) + '%';
-                                })(element.boundingBox)
-                              }</span>
-                              <span>Size: {
-                                ((box) => {
-                                  return 'Width' in box 
-                                    ? (box.Width * 100).toFixed(1) + '%'
-                                    : (box.width * 100).toFixed(1) + '%';
-                                })(element.boundingBox)
-                              } × {
-                                ((box) => {
-                                  return 'Height' in box 
-                                    ? (box.Height * 100).toFixed(1) + '%'
-                                    : (box.height * 100).toFixed(1) + '%';
-                                })(element.boundingBox)
-                              }</span>
+                        </div>
+                      </div>
+                      
+                      {/* Add controls for changing element type */}
+                      {selectedElements.includes(element.id) && activeDocType && !(element as ExtendedRedactionElement).missing && (
+                        <div className="mt-2 pt-2 border-t border-dashed flex items-center gap-2">
+                          <div className="text-xs font-medium">Change type:</div>
+                          <Select
+                            value={
+                              (element as ExtendedRedactionElement).type === '' 
+                                ? 'none' 
+                                : (element as ExtendedRedactionElement).type || 'Text'
+                            }
+                            onValueChange={(value) => {
+                              // Update the element type
+                              setExtractedElements(prev => 
+                                prev.map(el => 
+                                  el.id === element.id 
+                                    ? {
+                                        ...el, 
+                                        type: value === 'none' ? '' : value, 
+                                        label: value === 'none' ? '' : value
+                                      } 
+                                    : el
+                                )
+                              );
+                              
+                              toast({
+                                title: "Element type changed",
+                                description: `Changed to: ${value === 'none' ? 'None' : value}`,
+                                variant: "default"
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              {getConfiguredDataElements().map((de) => (
+                                <SelectItem key={de.id} value={de.type || de.name}>
+                                  {de.name}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="Text">Generic Text</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      
+                      {/* Show bounding box information if available */}
+                      {element.boundingBox && !(element as ExtendedRedactionElement).missing && (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          <div className="flex justify-between">
+                            <span>Position: {
+                              ((box) => {
+                                return 'Left' in box 
+                                  ? (box.Left * 100).toFixed(1) + '%'
+                                  : (box.x * 100).toFixed(1) + '%';
+                              })(element.boundingBox)
+                            }, {
+                              ((box) => {
+                                return 'Top' in box 
+                                  ? (box.Top * 100).toFixed(1) + '%'
+                                  : (box.y * 100).toFixed(1) + '%';
+                              })(element.boundingBox)
+                            }</span>
+                            <span>Size: {
+                              ((box) => {
+                                return 'Width' in box 
+                                  ? (box.Width * 100).toFixed(1) + '%'
+                                  : (box.width * 100).toFixed(1) + '%';
+                              })(element.boundingBox)
+                            } × {
+                              ((box) => {
+                                return 'Height' in box 
+                                  ? (box.Height * 100).toFixed(1) + '%'
+                                  : (box.height * 100).toFixed(1) + '%';
+                              })(element.boundingBox)
+                            }</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="category" className="mt-4">
+                <div className="space-y-4">
+                  {Object.entries(
+                    extractedElements.reduce((acc, element) => {
+                      const category = getElementCategory(
+                        element as ExtendedRedactionElement, 
+                        activeDocType || null
+                      );
+                      acc[category] = acc[category] || [];
+                      acc[category].push(element);
+                      return acc;
+                    }, {} as Record<string, typeof extractedElements>)
+                  ).map(([category, elements]) => (
+                    <div key={category} className="border rounded-md p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <h4 className="font-medium">{category}</h4>
+                        <Badge>{elements.length}</Badge>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        {elements.map(element => (
+                          <div 
+                            key={element.id}
+                            className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
+                              selectedElements.includes(element.id) 
+                                ? 'border-blue-500 bg-blue-50' 
+                                : (element as ExtendedRedactionElement).missing
+                                  ? 'border-gray-200 bg-gray-50 opacity-75'
+                                  : ''
+                            } ${(element as ExtendedRedactionElement).isConfigured ? 'border-l-4 border-l-blue-400' : ''}`}
+                            onClick={() => toggleElementSelection(element.id)}
+                          >
+                            <Checkbox
+                              checked={selectedElements.includes(element.id)}
+                              onCheckedChange={() => toggleElementSelection(element.id)}
+                              disabled={(element as ExtendedRedactionElement).missing}
+                            />
+                            <div className="flex-1">
+                              <div className="truncate max-w-md">{element.text}</div>
+                              <div className="text-xs flex items-center gap-2 mt-1">
+                                <Badge variant="secondary" className="text-xs">
+                                  {(element as ExtendedRedactionElement).type === '' 
+                                    ? 'None' 
+                                    : (element as ExtendedRedactionElement).type || 'Text'}
+                                </Badge>
+                                <span className="text-muted-foreground">
+                                  {(element as ExtendedRedactionElement).missing 
+                                    ? 'Not found in document'
+                                    : `Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
+                                  }
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        )}
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </TabsContent>
-                
-                <TabsContent value="category" className="mt-4">
+                    </div>
+                  ))}
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="configuration" className="mt-4">
+                {activeDocType && (
                   <div className="space-y-4">
-                    {Object.entries(
-                      extractedElements.reduce((acc, element) => {
-                        const category = getElementCategory(
-                          element as ExtendedRedactionElement, 
-                          activeDocType || null
-                        );
-                        acc[category] = acc[category] || [];
-                        acc[category].push(element);
-                        return acc;
-                      }, {} as Record<string, typeof extractedElements>)
-                    ).map(([category, elements]) => (
-                      <div key={category} className="border rounded-md p-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <h4 className="font-medium">{category}</h4>
-                          <Badge>{elements.length}</Badge>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          {elements.map(element => (
+                    {/* Configured elements section */}
+                    <div className="border rounded-md p-4">
+                      <h4 className="font-medium mb-2">Configured Elements</h4>
+                      <div className="space-y-2">
+                        {extractedElements
+                          .filter(element => (element as ExtendedRedactionElement).isConfigured)
+                          .map(element => (
                             <div 
                               key={element.id}
                               className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
@@ -2166,7 +2224,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                                   : (element as ExtendedRedactionElement).missing
                                     ? 'border-gray-200 bg-gray-50 opacity-75'
                                     : ''
-                              } ${(element as ExtendedRedactionElement).isConfigured ? 'border-l-4 border-l-blue-400' : ''}`}
+                              }`}
                               onClick={() => toggleElementSelection(element.id)}
                             >
                               <Checkbox
@@ -2175,12 +2233,13 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                                 disabled={(element as ExtendedRedactionElement).missing}
                               />
                               <div className="flex-1">
-                                <div className="truncate max-w-md">{element.text}</div>
+                                <div className="font-medium">
+                                  {(element as ExtendedRedactionElement).label}
+                                </div>
+                                <div className="text-sm">{element.text}</div>
                                 <div className="text-xs flex items-center gap-2 mt-1">
                                   <Badge variant="secondary" className="text-xs">
-                                    {(element as ExtendedRedactionElement).type === '' 
-                                      ? 'None' 
-                                      : (element as ExtendedRedactionElement).type || 'Text'}
+                                    {(element as ExtendedRedactionElement).type || 'Text'}
                                   </Badge>
                                   <span className="text-muted-foreground">
                                     {(element as ExtendedRedactionElement).missing 
@@ -2192,182 +2251,130 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                               </div>
                             </div>
                           ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </TabsContent>
-                
-                <TabsContent value="configuration" className="mt-4">
-                  {activeDocType && (
-                    <div className="space-y-4">
-                      {/* Configured elements section */}
-                      <div className="border rounded-md p-4">
-                        <h4 className="font-medium mb-2">Configured Elements</h4>
-                        <div className="space-y-2">
-                          {extractedElements
-                            .filter(element => (element as ExtendedRedactionElement).isConfigured)
-                            .map(element => (
-                              <div 
-                                key={element.id}
-                                className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
-                                  selectedElements.includes(element.id) 
-                                    ? 'border-blue-500 bg-blue-50' 
-                                    : (element as ExtendedRedactionElement).missing
-                                      ? 'border-gray-200 bg-gray-50 opacity-75'
-                                      : ''
-                                }`}
-                                onClick={() => toggleElementSelection(element.id)}
-                              >
-                                <Checkbox
-                                  checked={selectedElements.includes(element.id)}
-                                  onCheckedChange={() => toggleElementSelection(element.id)}
-                                  disabled={(element as ExtendedRedactionElement).missing}
-                                />
-                                <div className="flex-1">
-                                  <div className="font-medium">
-                                    {(element as ExtendedRedactionElement).label}
-                                  </div>
-                                  <div className="text-sm">{element.text}</div>
-                                  <div className="text-xs flex items-center gap-2 mt-1">
-                                    <Badge variant="secondary" className="text-xs">
-                                      {(element as ExtendedRedactionElement).type || 'Text'}
-                                    </Badge>
-                                    <span className="text-muted-foreground">
-                                      {(element as ExtendedRedactionElement).missing 
-                                        ? 'Not found in document'
-                                        : `Confidence: ${Math.min(100, (element.confidence * 100)).toFixed(0)}%`
-                                      }
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                      
-                      {/* Other detected elements section */}
-                      <div className="border rounded-md p-4">
-                        <h4 className="font-medium mb-2">Other Detected Elements</h4>
-                        <div className="space-y-2">
-                          {extractedElements
-                            .filter(element => !(element as ExtendedRedactionElement).isConfigured && !(element as ExtendedRedactionElement).missing)
-                            .map(element => (
-                              <div 
-                                key={element.id}
-                                className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
-                                  selectedElements.includes(element.id) ? 'border-blue-500 bg-blue-50' : ''
-                                }`}
-                                onClick={() => toggleElementSelection(element.id)}
-                              >
-                                <Checkbox
-                                  checked={selectedElements.includes(element.id)}
-                                  onCheckedChange={() => toggleElementSelection(element.id)}
-                                />
-                                <div className="flex-1">
-                                  <div className="font-medium">
-                                    {(element as ExtendedRedactionElement).label || 'Unknown element'}
-                                  </div>
-                                  <div className="text-sm">{element.text}</div>
-                                  <div className="text-xs flex items-center gap-2 mt-1">
-                                    <Badge variant="secondary" className="text-xs">
-                                      {(element as ExtendedRedactionElement).type || 'Text'}
-                                    </Badge>
-                                    <span className="text-muted-foreground">
-                                      Confidence: {Math.min(100, (element.confidence * 100)).toFixed(0)}%
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          {extractedElements.filter(element => !(element as ExtendedRedactionElement).isConfigured && !(element as ExtendedRedactionElement).missing).length === 0 && (
-                            <div className="text-sm text-muted-foreground text-center py-2">
-                              No additional elements detected
-                            </div>
-                          )}
-                        </div>
                       </div>
                     </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-              
-              <Button
-                className="bg-red-600 text-white hover:bg-red-700 mt-4"
-                disabled={selectedElements.length === 0 || isProcessing}
-                onClick={handleApplyRedactions}
-              >
-                <Eraser className="mr-2 h-4 w-4" />
-                Apply Redactions ({selectedElements.length})
-              </Button>
-            </Card>
-          )}
-        </div>
-      </div>
-
-      <Dialog open={verificationOpen} onOpenChange={setVerificationOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Verify Document Classification</DialogTitle>
-            <DialogDescription>
-              Please verify if the automatic classification is correct.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Classification Result:</p>
-              <div className="p-3 border rounded-md bg-muted/30">
-                <p><strong>Document Type:</strong> {classificationResult?.documentType}</p>
-                {classificationResult && (
-                  <p><strong>Confidence:</strong> {(classificationResult.confidence * 100).toFixed(1)}%</p>
+                    
+                    {/* Other detected elements section */}
+                    <div className="border rounded-md p-4">
+                      <h4 className="font-medium mb-2">Other Detected Elements</h4>
+                      <div className="space-y-2">
+                        {extractedElements
+                          .filter(element => !(element as ExtendedRedactionElement).isConfigured && !(element as ExtendedRedactionElement).missing)
+                          .map(element => (
+                            <div 
+                              key={element.id}
+                              className={`p-2 border rounded flex items-center space-x-2 cursor-pointer hover:bg-gray-50 ${
+                                selectedElements.includes(element.id) ? 'border-blue-500 bg-blue-50' : ''
+                              }`}
+                              onClick={() => toggleElementSelection(element.id)}
+                            >
+                              <Checkbox
+                                checked={selectedElements.includes(element.id)}
+                                onCheckedChange={() => toggleElementSelection(element.id)}
+                              />
+                              <div className="flex-1">
+                                <div className="font-medium">
+                                  {(element as ExtendedRedactionElement).label || 'Unknown element'}
+                                </div>
+                                <div className="text-sm">{element.text}</div>
+                                <div className="text-xs flex items-center gap-2 mt-1">
+                                  <Badge variant="secondary" className="text-xs">
+                                    {(element as ExtendedRedactionElement).type || 'Text'}
+                                  </Badge>
+                                  <span className="text-muted-foreground">
+                                    Confidence: {Math.min(100, (element.confidence * 100)).toFixed(0)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        {extractedElements.filter(element => !(element as ExtendedRedactionElement).isConfigured && !(element as ExtendedRedactionElement).missing).length === 0 && (
+                          <div className="text-sm text-muted-foreground text-center py-2">
+                            No additional elements detected
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </div>
-            </div>
+              </TabsContent>
+            </Tabs>
             
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Is this classification correct?</p>
-              <div className="flex gap-2">
-                <Button 
-                  onClick={() => handleVerification(true)} 
-                  className="flex-1"
-                >
-                  Yes, it's correct
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => setVerificationOpen(true)} 
-                  className="flex-1"
-                >
-                  No, select correct type
-                </Button>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Or select the correct document type:</p>
-              <Select onValueChange={(value) => handleVerification(false, value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select document type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableDocTypes.map((docType) => (
-                    <SelectItem key={docType.id} value={docType.id}>
-                      {docType.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setVerificationOpen(false)}>
-              Cancel
+            <Button
+              className="bg-red-600 text-white hover:bg-red-700 mt-4"
+              disabled={selectedElements.length === 0 || isProcessing}
+              onClick={handleApplyRedactions}
+            >
+              <Eraser className="mr-2 h-4 w-4" />
+              Apply Redactions ({selectedElements.length})
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Card>
+        )}
+
+        <Dialog open={verificationOpen} onOpenChange={setVerificationOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Verify Document Classification</DialogTitle>
+              <DialogDescription>
+                Please verify if the automatic classification is correct.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Classification Result:</p>
+                <div className="p-3 border rounded-md bg-muted/30">
+                  <p><strong>Document Type:</strong> {classificationResult?.documentType}</p>
+                  {classificationResult && (
+                    <p><strong>Confidence:</strong> {(classificationResult.confidence * 100).toFixed(1)}%</p>
+                  )}
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Is this classification correct?</p>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={() => handleVerification(true)} 
+                    className="flex-1"
+                  >
+                    Yes, it's correct
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setVerificationOpen(true)} 
+                    className="flex-1"
+                  >
+                    No, select correct type
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Or select the correct document type:</p>
+                <Select onValueChange={(value) => handleVerification(false, value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select document type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableDocTypes.map((docType) => (
+                      <SelectItem key={docType.id} value={docType.id}>
+                        {docType.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setVerificationOpen(false)}>
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </>
   )
 }
