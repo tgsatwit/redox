@@ -73,12 +73,146 @@ import type {
   DocumentData, 
   DocumentTypeConfig, 
   DocumentSubTypeConfig, 
-  DataElementConfig, 
   DataElementType, 
   DataElementCategory, 
   DataElementAction,
+  DataElementConfig,
   ClassificationResult 
 } from "@/lib/types"
+
+// Add after the document-processor imports 
+
+// Add after ExtendedRedactionElement interface (line ~105)
+
+// Direct mapping table between Textract field names and configured element names
+const FIELD_MAPPING_TABLE: Record<string, string[]> = {
+  // Name fields with underscore format
+  "FIRST_NAME": ["First Name", "Given Name", "Prénom"],
+  "GIVEN_NAME": ["First Name", "Given Name", "Prénom"],
+  "LAST_NAME": ["Last Name", "Family Name", "Surname", "Nom"],
+  "FAMILY_NAME": ["Last Name", "Family Name", "Surname", "Nom"],
+  "MIDDLE_NAME": ["Middle Name"],
+  "FULL_NAME": ["Full Name", "Name", "Complete Name"],
+  
+  // Date of Birth variations
+  "DATE_OF_BIRTH": ["Date of Birth", "DOB", "Birth Date"],
+  "DOB": ["Date of Birth", "DOB", "Birth Date"],
+  "BIRTH_DATE": ["Date of Birth", "DOB", "Birth Date"],
+  "BIRTHDATE": ["Date of Birth", "DOB", "Birth Date"],
+  
+  // Document Numbers
+  "DOCUMENT_NUMBER": ["Passport Number", "Document Number", "Document ID"],
+  "PASSPORT_NUMBER": ["Passport Number", "Document Number"],
+  "ID_NUMBER": ["Passport Number", "Document Number", "ID Number"],
+  
+  // Date fields
+  "DATE_OF_ISSUE": ["Date of Issue", "Issue Date"],
+  "ISSUE_DATE": ["Date of Issue", "Issue Date"],
+  "DATE_OF_EXPIRY": ["Expiration Date", "Expiry Date"],
+  "EXPIRY_DATE": ["Expiration Date", "Expiry Date"],
+  "EXPIRATION_DATE": ["Expiration Date", "Expiry Date"],
+  
+  // Other fields
+  "NATIONALITY": ["Nationality", "Citizenship"],
+  "PLACE_OF_BIRTH": ["Place of Birth", "Birth Place"],
+  "MRZ_CODE": ["MRZ Code", "Machine Readable Zone"],
+  "ID_TYPE": ["ID Type", "Document Type"]
+};
+
+// Add after getConfiguredDataElements function
+
+/**
+ * Find a matching configured element for an extracted field using the mapping table
+ */
+const findMatchingElement = (extractedLabel: string, configuredElements: DataElementConfig[]): DataElementConfig | null => {
+  if (!extractedLabel || !configuredElements?.length) {
+    return null;
+  }
+
+  console.log(`Looking for match for label: ${extractedLabel}`);
+  
+  // Direct exact matches for underscore format fields - highest priority
+  // This is a special case for fields like FIRST_NAME, LAST_NAME, etc.
+  const directHumanReadableMap: Record<string, string> = {
+    'FIRST_NAME': 'First Name',
+    'LAST_NAME': 'Last Name',
+    'MIDDLE_NAME': 'Middle Name',
+    'FULL_NAME': 'Full Name',
+    'DATE_OF_BIRTH': 'Date of Birth',
+    'DATE_OF_ISSUE': 'Date of Issue',
+    'DATE_OF_EXPIRY': 'Expiration Date',
+    'EXPIRATION_DATE': 'Expiration Date',
+    'DOCUMENT_NUMBER': 'Document Number',
+    'PASSPORT_NUMBER': 'Passport Number',
+    'MRZ_CODE': 'MRZ Code',
+    'PLACE_OF_BIRTH': 'Place of Birth'
+  };
+  
+  // First priority: direct mapping from underscore format to human readable
+  if (directHumanReadableMap[extractedLabel]) {
+    const humanReadableName = directHumanReadableMap[extractedLabel];
+    const matchingElement = configuredElements.find(
+      element => element.name.toLowerCase() === humanReadableName.toLowerCase()
+    );
+    
+    if (matchingElement) {
+      console.log(`✅ Found direct underscore format match: "${extractedLabel}" → "${matchingElement.name}"`);
+      return matchingElement;
+    }
+  }
+
+  // Normalize the extracted label
+  const normalizedLabel = extractedLabel
+    .toUpperCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^A-Z0-9_]/g, '');
+  
+  // Second priority: entry in our mapping table
+  if (FIELD_MAPPING_TABLE[normalizedLabel]) {
+    const potentialMatches = FIELD_MAPPING_TABLE[normalizedLabel];
+    
+    for (const potentialMatch of potentialMatches) {
+      const matchingElement = configuredElements.find(
+        element => element.name.toLowerCase() === potentialMatch.toLowerCase()
+      );
+      
+      if (matchingElement) {
+        console.log(`✅ Found mapping table match: "${normalizedLabel}" → "${matchingElement.name}"`);
+        return matchingElement;
+      }
+    }
+  }
+  
+  // Third priority: try normalizing the configured element names and compare
+  const matchByNormalization = configuredElements.find(element => {
+    const normalizedConfigName = element.name
+      .toUpperCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Z0-9_]/g, '');
+    
+    return normalizedConfigName === normalizedLabel;
+  });
+  
+  if (matchByNormalization) {
+    console.log(`✅ Found normalized name match: "${normalizedLabel}" → "${matchByNormalization.name}"`);
+    return matchByNormalization;
+  }
+  
+  // Last priority: fuzzy match by substring inclusion
+  for (const element of configuredElements) {
+    const normalizedConfigName = element.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const normalizedExtractedNoUnderscores = normalizedLabel.replace(/_/g, '');
+    
+    if (normalizedConfigName.includes(normalizedExtractedNoUnderscores) || 
+        normalizedExtractedNoUnderscores.includes(normalizedConfigName)) {
+      console.log(`✅ Found fuzzy substring match: "${normalizedLabel}" → "${element.name}"`);
+      return element;
+    }
+  }
+  
+  console.log(`❌ No match found for: "${extractedLabel}"`);
+  return null;
+};
 
 // Define missing types
 interface AnyBoundingBox {
@@ -218,12 +352,6 @@ export function DocumentProcessor() {
   // New state variables for the enhanced workflow
   const [workflowStep, setWorkflowStep] = useState<'upload' | 'classify' | 'process' | 'results'>('upload')
   const [useTextExtractionForClassification, setUseTextExtractionForClassification] = useState(false)
-  const [processingOptions, setProcessingOptions] = useState({
-    extractSpecificElements: true,
-    redactElements: false,
-    extractFullText: false,
-    identifyPII: false
-  })
   const [isClassifyingWithGPT, setIsClassifyingWithGPT] = useState(false)
   const [gptClassificationResult, setGptClassificationResult] = useState<{
     documentType: string | null,
@@ -561,71 +689,84 @@ export function DocumentProcessor() {
     setProcessError(null);
     
     try {
+      console.log('Starting processing workflow');
+      console.log('Using field mapping table with', Object.keys(FIELD_MAPPING_TABLE).length, 'field mappings');
+      
       // Always ensure text extraction is done first if not already available
       if (!extractedText) {
         toast({
           title: "Extracting text",
           description: "Text extraction is required for data element matching",
-          variant: "default"
         });
         await handleExtractText();
       }
       
-      // Proceed with other processes
-      const processes: Promise<any>[] = [];
+      const processes = [];
       
       // Extract specific elements
       if (processingOptions.extractSpecificElements) {
+        console.log('Starting element extraction...');
         processes.push(handleProcessDocument());
       }
       
-      // Wait for all processes to complete
+      // Wait for all selected processes to complete
       await Promise.all(processes);
+      console.log('All selected processes completed');
       
-      // After processing, match extracted elements with configured elements
-      if (extractedElements.length > 0 && activeDocumentTypeId) {
-        await matchExtractedWithConfigured();
-      }
-      
-      // After processing, if redaction is selected and we have extracted elements, apply redactions
+      // After processing, if redaction is selected and we have elements, apply redactions
       if (processingOptions.redactElements && extractedElements.length > 0) {
+        console.log('Starting automatic redaction...');
+        
         // Auto-select PII elements for redaction if identifyPII is enabled
         if (processingOptions.identifyPII) {
           const piiElementIds = extractedElements
             .filter(element => {
-              const typedElement = element as ExtendedRedactionElement;
-              return typedElement.category === 'PII' || 
-                    (typedElement.type && ['Name', 'Email', 'Phone', 'Address', 'SSN', 'DOB'].includes(typedElement.type));
+              // Select elements that are configured for redaction or are PII
+              const isConfiguredForRedaction = (element as ExtendedRedactionElement).action === 'Redact' || 
+                                             (element as ExtendedRedactionElement).action === 'ExtractAndRedact';
+              
+              const isPII = (element as ExtendedRedactionElement).category === 'PersonalIdentifier' || 
+                           (element as ExtendedRedactionElement).label?.includes('NAME') || 
+                           (element as ExtendedRedactionElement).label?.includes('DOB') ||
+                           (element as ExtendedRedactionElement).label?.includes('BIRTH') ||
+                           (element as ExtendedRedactionElement).label?.includes('ADDRESS');
+              
+              return isConfiguredForRedaction || isPII;
             })
             .map(element => element.id);
           
-          setSelectedElements(piiElementIds);
+          // Set the fields to redact
+          setFieldsToRedact(new Set(piiElementIds));
+          console.log(`Auto-selected ${piiElementIds.length} PII elements for redaction`);
         }
         
-        // Auto-select elements that have Redact or ExtractAndRedact actions from configuration
-        const configuredToRedact = extractedElements
-          .filter(element => {
-            const typedElement = element as ExtendedRedactionElement;
-            return typedElement.action === 'Redact' || typedElement.action === 'ExtractAndRedact';
-          })
-          .map(element => element.id);
-        
-        // Combine with any existing selections, removing duplicates
-        setSelectedElements(prevSelected => {
-          const combined = [...prevSelected, ...configuredToRedact];
-          return [...new Set(combined)]; // Remove duplicates
-        });
-        
-        await handleApplyRedactions();
+        // Apply redactions
+        if (fieldsToRedact.size > 0) {
+          console.log(`Applying redactions to ${fieldsToRedact.size} fields`);
+          await handleApplyRedactions();
+        } else {
+          console.log('No fields selected for redaction');
+        }
       }
       
-      // Move to results tab
-      setActiveTab("extracted");
-      setWorkflowStep('results');
+      // After other processes are complete, handle the new options
+      if (processingOptions.createSummary) {
+        console.log('Creating document summary...');
+        await createDocumentSummary();
+      }
       
+      if (processingOptions.saveDocument) {
+        console.log(`Saving document with ${retentionPeriod} retention...`);
+        await saveDocumentWithRetention(retentionPeriod);
+      }
     } catch (error) {
-      console.error("Error running selected processes:", error);
-      setProcessError(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
+      console.error('Error in processing workflow:', error);
+      setProcessError(error instanceof Error ? error.message : 'An unknown error occurred');
+      toast({
+        title: "Processing Error",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive"
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -1454,47 +1595,53 @@ export function DocumentProcessor() {
   const handleApplyRedactions = async () => {
     if (!file) {
       toast({
-        title: "No file selected",
-        description: "Please upload a document first.",
+        title: "Error",
+        description: "No file available for redaction.",
         variant: "destructive"
       });
       return;
     }
-    
-    if (selectedElements.length === 0) {
-      toast({
-        title: "No elements selected",
-        description: "Please select elements to redact.",
-        variant: "destructive"
-      });
-      return;
-    }
-    
-    setIsProcessing(true);
     
     try {
-      let fileToRedact = file;
+      setIsProcessing(true);
       
-      // If it's a PDF and we have a base64 version, convert it to a File object
-      if (file.type === "application/pdf" && imageUrl && imageUrl.startsWith('data:application/pdf;base64,')) {
-        const base64Data = imageUrl.split(',')[1];
-        fileToRedact = convertBase64ToFile(base64Data, file.name, 'application/pdf');
-      }
+      // Use the original file for redaction
+      const fileToRedact = file;
+      
+      // Log the bounding boxes of elements to be redacted for debugging
+      console.log("Elements to be redacted:");
+      const elementsToRedact = extractedElements.filter(el => selectedElements.includes(el.id));
+      elementsToRedact.forEach(el => {
+        console.log(`Element ID: ${el.id}, Label: ${(el as any).label || 'No label'}, Bounding Box:`, el.boundingBox);
+        
+        if (!el.boundingBox) {
+          console.warn(`⚠️ Element ${el.id} has no bounding box! Redaction may not work correctly.`);
+        }
+      });
       
       // Create the document data structure expected by redactDocument
       const documentDataForRedaction = {
         documentType: activeDocType?.name || 'Unknown',
         confidence: 100,
         extractedText: extractedText || '',
-        extractedFields: extractedElements.map(element => ({
-          id: element.id,
-          label: (element as any).label || 'Text',
-          value: element.text,
-          dataType: (element as any).type || 'Text',
-          confidence: element.confidence,
-          boundingBox: element.boundingBox,
-          page: element.pageIndex
-        }))
+        extractedFields: extractedElements.map(element => {
+          const boundingBox = element.boundingBox;
+          
+          // Log each element's bounding box to help debug
+          if (selectedElements.includes(element.id)) {
+            console.log(`Sending element for redaction - ID: ${element.id}, Bounding Box:`, boundingBox);
+          }
+          
+          return {
+            id: element.id,
+            label: (element as any).label || 'Text',
+            value: element.text,
+            dataType: (element as any).type || 'Text',
+            confidence: element.confidence,
+            boundingBox: boundingBox, // Ensure we're passing the boundingBox correctly
+            page: element.pageIndex
+          };
+        })
       };
       
       // Call the redaction function
@@ -1964,47 +2111,370 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
   };
 
   // New function to match extracted elements with configured elements
-  const matchExtractedWithConfigured = async () => {
-    // Get the configured data elements for current document type/subtype
-    const configuredElements = getConfiguredDataElements();
-    if (!configuredElements.length) return;
-    
-    // Clone the current extracted elements to update them
-    const updatedElements = [...extractedElements] as ExtendedRedactionElement[];
-    let hasUpdates = false;
-    
-    // For each extracted element, try to find a matching configured element
-    updatedElements.forEach(element => {
-      if (!element.label) return;
+  const matchExtractedWithConfigured = async (initialElements?: ExtendedRedactionElement[]) => {
+    console.log('Starting matchExtractedWithConfigured');
+    try {
+      // Get the configured data elements for current document type/subtype
+      const configuredElements = getConfiguredDataElements();
+      if (!configuredElements.length) {
+        console.log('No configured elements found');
+        return;
+      }
       
-      // Try to find a match in the configured elements
-      const matchingConfig = configuredElements.find(config => 
-        config.name.toLowerCase() === element.label?.toLowerCase() || 
-        element.label?.toLowerCase().includes(config.name.toLowerCase())
+      console.log(`Found ${configuredElements.length} configured elements`);
+      
+      // Use provided elements or current extracted elements
+      // Cast extracted elements to ExtendedRedactionElement to ensure type safety
+      const workingElements: ExtendedRedactionElement[] = (initialElements || 
+        extractedElements.map(el => ({
+          ...el,
+          // Ensure all required properties for ExtendedRedactionElement exist
+          label: (el as any).label || null,
+          category: (el as any).category || null,
+          boundingBox: el.boundingBox || null,
+          text: el.text || "",
+          confidence: el.confidence || 0,
+          pageIndex: el.pageIndex || 0
+        } as ExtendedRedactionElement))
       );
       
-      if (matchingConfig) {
-        // Update the element with the configuration data
-        element.isConfigured = true;
-        element.category = matchingConfig.category;
-        element.action = matchingConfig.action;
-        hasUpdates = true;
+      if (!workingElements || workingElements.length === 0) {
+        console.log('No elements to match');
+        return;
       }
-    });
-    
-    // If updates were made, update the state
-    if (hasUpdates) {
-      setExtractedElements(updatedElements as RedactionElement[]);
+      
+      console.log(`Working with ${workingElements.length} elements to match`);
+      
+      // Create a new array to hold the matched elements
+      const matchedElements: ExtendedRedactionElement[] = [];
+      const unmatchedExtractedElements: ExtendedRedactionElement[] = [];
+      
+      // Clone the configured elements to track which ones were matched
+      const unmatched = [...configuredElements];
+      
+      // Debug the bounding boxes in the original elements
+      workingElements.forEach(el => {
+        console.log(`Element "${(el as ExtendedRedactionElement).label || el.id}" bounding box:`, el.boundingBox);
+      });
+      
+      // First try to match using the extracted element label as-is (underscore format)
+      console.log("FIRST PASS: Direct matching with element labels");
+      for (const element of workingElements) {
+        if (!(element as ExtendedRedactionElement).label) {
+          console.log('Element missing label, skipping for direct match', element);
+          continue;
+        }
+        
+        // Try to find a direct match in the configured elements
+        const directMatch = configuredElements.find(config => {
+          // Normalize both names for comparison
+          const normalizedConfig = config.name
+            .toUpperCase()
+            .replace(/[^A-Z0-9_]/g, '');
+          
+          const normalizedLabel = (element as ExtendedRedactionElement).label!
+            .toUpperCase()
+            .replace(/[^A-Z0-9_]/g, '');
+            
+          return normalizedConfig === normalizedLabel;
+        });
+        
+        if (directMatch) {
+          console.log(`Direct match found for "${(element as ExtendedRedactionElement).label}" → "${directMatch.name}"`);
+          const matchingIndex = unmatched.findIndex(e => e.id === directMatch.id);
+          if (matchingIndex !== -1) {
+            unmatched.splice(matchingIndex, 1);
+          }
+          
+          // Create a new matched element
+          const matchedElement: ExtendedRedactionElement = {
+            id: element.id,
+            text: element.text,
+            confidence: element.confidence,
+            pageIndex: element.pageIndex,
+            value: element.text,
+            label: directMatch.name,
+            isConfigured: true,
+            action: directMatch.action as DataElementAction,
+            category: directMatch.category || (element as ExtendedRedactionElement).category || 'Unknown',
+            // Explicitly preserve the bounding box
+            boundingBox: element.boundingBox,
+          };
+          
+          matchedElements.push(matchedElement);
+        }
+      }
+      
+      // Second pass - use the mapping table for remaining elements
+      console.log("SECOND PASS: Using mapping table for remaining elements");
+      const remainingElements = workingElements.filter(el => 
+        !matchedElements.some(matched => matched.label === (el as ExtendedRedactionElement).label)
+      );
+      
+      for (const element of remainingElements) {
+        if (!(element as ExtendedRedactionElement).label) {
+          console.log('Element missing label, skipping', element);
+          unmatchedExtractedElements.push(element as ExtendedRedactionElement);
+          continue;
+        }
+        
+        // Try to find a match using our mapping function
+        const matchingConfig = findMatchingElement((element as ExtendedRedactionElement).label, configuredElements);
+        
+        if (matchingConfig) {
+          // Found a match
+          const matchingIndex = unmatched.findIndex(e => e.id === matchingConfig.id);
+          if (matchingIndex !== -1) {
+            unmatched.splice(matchingIndex, 1);
+          }
+          
+          // Create a new matched element
+          const matchedElement: ExtendedRedactionElement = {
+            id: element.id,
+            text: element.text,
+            confidence: element.confidence,
+            pageIndex: element.pageIndex,
+            value: element.text,
+            label: matchingConfig.name,
+            isConfigured: true,
+            action: matchingConfig.action as DataElementAction,
+            category: matchingConfig.category || (element as ExtendedRedactionElement).category || 'Unknown',
+            // Explicitly preserve the bounding box
+            boundingBox: element.boundingBox, 
+          };
+          
+          console.log(`Matched "${(element as ExtendedRedactionElement).label}" → "${matchingConfig.name}" with bounding box:`, matchedElement.boundingBox);
+          
+          matchedElements.push(matchedElement);
+        } else {
+          // No match found
+          unmatchedExtractedElements.push(element as ExtendedRedactionElement);
+        }
+      }
+      
+      console.log(`Matched ${matchedElements.length} elements`);
+      console.log(`Have ${unmatchedExtractedElements.length} unmatched extracted elements`);
+      console.log(`Have ${unmatched.length} unmatched configured elements`);
+      
+      // Create placeholder elements for all unmatched configured elements
+      const unmatchedPlaceholders = unmatched.map(config => {
+        return {
+          id: config.id,
+          category: config.category || 'Unknown',
+          name: config.name,
+          text: "", // Required property
+          confidence: 0, // Required property
+          pageIndex: 0, // Required property
+          isConfigured: true,
+          missing: true,
+          action: config.action as DataElementAction,
+          boundingBox: null,
+          label: config.name // Add label property
+        } as ExtendedRedactionElement;
+      });
+      
+      // Combine matches, unmatched extracted elements, and placeholders for unmatched configured elements
+      const resultElements = [
+        ...matchedElements,
+        ...unmatchedExtractedElements,
+        ...unmatchedPlaceholders
+      ];
+      
+      // Log bounding boxes for matched elements for verification
+      console.log("BOUNDING BOX CHECK - Matched elements:");
+      matchedElements.forEach(el => {
+        console.log(`${el.label || el.name || el.id} bounding box:`, el.boundingBox);
+      });
+      
+      // Update state with all elements
+      setExtractedElements(resultElements as RedactionElement[]);
+      
+      // Log the matching results for debugging
+      console.log('Matching complete. Final element count:', resultElements.length);
       
       toast({
-        title: "Data elements matched",
-        description: "Extracted elements have been matched with configuration",
-        variant: "default"
+        title: "Element matching complete",
+        description: `${matchedElements.length} elements matched. ${unmatchedPlaceholders.length} configured elements without matches.`,
+        variant: "default",
       });
+      
+      return resultElements;
+    } catch (error) {
+      console.error('Error in matchExtractedWithConfigured:', error);
+      toast({
+        title: "Error matching elements",
+        description: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "destructive",
+      });
+      return null;
+    }
+  };
+
+  // Add the UI to display the document summary in the results tab
+  // Find the TabsContent with value="extracted" and add a new section for the summary:
+
+  // Add state to store the document summary
+  const [documentSummary, setDocumentSummary] = useState<string | null>(null);
+
+  // Then add the createDocumentSummary function near the other document processing functions
+  const createDocumentSummary = async () => {
+    if (!extractedText || !activeDocType) {
+      toast({
+        title: "Cannot create summary",
+        description: "Extracted text and document type are required for summary creation",
+        variant: "destructive"
+      });
+      return;
     }
     
-    return updatedElements;
+    try {
+      setIsProcessing(true);
+      
+      // Prepare the summary request data
+      const summaryData = {
+        documentType: activeDocType.name,
+        extractedText: extractedText,
+        extractedElements: extractedElements,
+        documentSubType: selectedSubTypeId ? 
+          (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null
+      };
+      
+      // We would typically make an API call here to generate a summary
+      // For now, we'll simulate it with a timeout
+      
+      // In a real implementation, you would call an API like:
+      // const response = await fetch('/api/create-document-summary', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify(summaryData)
+      // });
+      
+      console.log("Creating document summary with data:", summaryData);
+      
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // For demo purposes, create a simple summary from the extracted elements
+      const formattedElements = extractedElements
+        .filter(el => el.value || el.text)
+        .map(el => {
+          const elementName = (el as ExtendedRedactionElement).label || el.id;
+          const elementValue = (el as ExtendedRedactionElement).value || el.text || 'N/A';
+          return `${elementName}: ${elementValue}`;
+        });
+      
+      const summary = `
+Document Summary
+----------------
+Document Type: ${activeDocType.name}
+${selectedSubTypeId && activeDocType.subTypes 
+  ? `Document Sub-Type: ${activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.name || ''}` 
+  : ''}
+Date Processed: ${new Date().toISOString().split('T')[0]}
+
+Extracted Information:
+${formattedElements.join('\n')}
+
+${extractedText ? `Text Extract (first 200 chars): 
+${extractedText.substring(0, 200)}...` : ''}
+      `.trim();
+      
+      console.log("Generated summary:", summary);
+      
+      // Update state with the summary
+      setDocumentSummary(summary);
+      
+      toast({
+        title: "Summary created",
+        description: "Document summary has been generated successfully",
+        variant: "default"
+      });
+      
+    } catch (error) {
+      console.error("Error creating document summary:", error);
+      toast({
+        title: "Summary creation failed",
+        description: error instanceof Error ? error.message : "Failed to create document summary",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
+  
+  // Add the saveDocumentWithRetention function
+  const saveDocumentWithRetention = async (retention: string) => {
+    if (!file) {
+      toast({
+        title: "Cannot save document",
+        description: "No document file is available",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    try {
+      setIsProcessing(true);
+      
+      // Prepare document metadata
+      const documentMetadata = {
+        documentType: activeDocType?.name || 'Unknown',
+        documentSubType: selectedSubTypeId ? 
+          (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null,
+        retention: retention,
+        processedDate: new Date().toISOString(),
+        extractedElements: extractedElements,
+        // Include any other metadata needed
+      };
+      
+      // We would typically make an API call here to save the document
+      // For now, we'll simulate it with a timeout
+      
+      // In a real implementation, you would upload the file and metadata:
+      // const formData = new FormData();
+      // formData.append('file', file);
+      // formData.append('metadata', JSON.stringify(documentMetadata));
+      // const response = await fetch('/api/save-document', {
+      //   method: 'POST',
+      //   body: formData
+      // });
+      
+      console.log(`Saving document with retention: ${retention}`);
+      console.log("Document metadata:", documentMetadata);
+      
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      toast({
+        title: "Document saved",
+        description: `Document has been saved with ${retention} retention policy`,
+        variant: "default"
+      });
+      
+    } catch (error) {
+      console.error("Error saving document:", error);
+      toast({
+        title: "Document save failed",
+        description: error instanceof Error ? error.message : "Failed to save document",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Add after other state variables declarations, around line 350
+  const [allElements, setAllElements] = useState<ExtendedRedactionElement[]>([])
+  const [activeDocumentSubType, setActiveDocumentSubType] = useState<DocumentSubTypeConfig | null>(null)
+  const [processingOptions, setProcessingOptions] = useState({
+    extractSpecificElements: true,
+    extractFullText: false,
+    redactElements: false,
+    identifyPII: false,
+    createSummary: false,
+    saveDocument: false
+  })
+  const [retentionPeriod, setRetentionPeriod] = useState<string>("2years")
 
   return (
     <>
@@ -2347,51 +2817,32 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                   
                   <div className="space-y-4">
                     <div className="flex items-center justify-between border-b pb-2">
-                      <div>
-                        <p className="font-medium">Extract Specific Data Elements</p>
-                        <p className="text-sm text-muted-foreground">
-                          Extract structured data based on document type configuration
-                        </p>
+                      <div className="space-y-0.5">
+                        <Label htmlFor="extract-elements">Extract Specific Elements</Label>
+                        <p className="text-xs text-muted-foreground">Identify and extract data elements</p>
                       </div>
                       <Switch 
                         checked={processingOptions.extractSpecificElements}
                         onCheckedChange={() => handleProcessOptionChange('extractSpecificElements')}
                       />
                     </div>
-                    
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <div>
-                        <p className="font-medium">Redact Document Data Elements</p>
-                        <p className="text-sm text-muted-foreground">
-                          Apply redaction based on configured actions ({activeDocType?.dataElements.filter(e => e.action === 'Redact' || e.action === 'ExtractAndRedact').length || 0} element(s) configured for redaction)
-                        </p>
+
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="redact-elements">Redact Elements</Label>
+                        <p className="text-xs text-muted-foreground">Redact sensitive information</p>
                       </div>
                       <Switch 
                         checked={processingOptions.redactElements}
                         onCheckedChange={() => handleProcessOptionChange('redactElements')}
                       />
                     </div>
-                    
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <div>
-                        <p className="font-medium">Extract Full Text</p>
-                        <p className="text-sm text-muted-foreground">
-                          {extractedText 
-                            ? "Text has already been extracted" 
-                            : "Text extraction is required for data element matching"}
-                        </p>
-                      </div>
-                      <Switch 
-                        checked={true}
-                        disabled={true}
-                      />
-                    </div>
-                    
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <div>
-                        <p className="font-medium">Identify PII Data in Extract</p>
-                        <p className="text-sm text-muted-foreground">
-                          Automatically identify personal information for redaction
+
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="identify-pii">Identify PII Data</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Automatically identify personally identifiable information
                         </p>
                       </div>
                       <Switch 
@@ -2400,13 +2851,60 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                         disabled={!processingOptions.extractSpecificElements && !processingOptions.redactElements}
                       />
                     </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="create-summary">Create Document Summary</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Generate a summary of the document's contents
+                        </p>
+                      </div>
+                      <Switch 
+                        checked={processingOptions.createSummary}
+                        onCheckedChange={() => handleProcessOptionChange('createSummary')}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="save-document">Save Document</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Save document to the system with retention policy
+                        </p>
+                      </div>
+                      <Switch 
+                        checked={processingOptions.saveDocument}
+                        onCheckedChange={() => handleProcessOptionChange('saveDocument')}
+                      />
+                    </div>
+                    
+                    {/* Show retention options when Save Document is enabled */}
+                    {processingOptions.saveDocument && (
+                      <div className="mt-2 pl-2 border-l-2 border-muted">
+                        <p className="text-sm font-medium mb-1">Retention Period:</p>
+                        <Select
+                          value={retentionPeriod}
+                          onValueChange={setRetentionPeriod}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select Retention Period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="2years">2 Years</SelectItem>
+                            <SelectItem value="5years">5 Years</SelectItem>
+                            <SelectItem value="7years">7 Years</SelectItem>
+                            <SelectItem value="10years">10 Years</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Action buttons */}
                   <div className="flex gap-2 pt-4">
                     <Button 
                       onClick={runSelectedProcesses}
-                      disabled={isProcessing || (!processingOptions.extractSpecificElements && !processingOptions.extractFullText && !processingOptions.redactElements)}
+                      disabled={isProcessing || (!processingOptions.extractSpecificElements && !processingOptions.redactElements && !processingOptions.createSummary)}
                       className="flex-1"
                     >
                       {isProcessing ? (
@@ -2562,6 +3060,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="mb-4">
                   <TabsTrigger value="original">Original Document</TabsTrigger>
+                  <TabsTrigger value="extracted">Extracted Data</TabsTrigger>
                   {extractedText && <TabsTrigger value="text">Extracted Text</TabsTrigger>}
                   {redactedImageUrl && <TabsTrigger value="redacted">Redacted Document</TabsTrigger>}
                 </TabsList>
@@ -2601,73 +3100,88 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                   </div>
                 </TabsContent>
                 
-                <TabsContent value="text" className="mt-0">
-                  {extractedText ? (
-                    <div className="border rounded-md bg-muted/20">
-                      <div className="flex justify-end mb-2 p-3">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => {
-                            // Download extracted text as a .txt file
-                            if (extractedText) {
-                              const blob = new Blob([extractedText], { type: 'text/plain' });
-                              const url = URL.createObjectURL(blob);
-                              const link = document.createElement("a");
-                              link.href = url;
-                              link.download = `${file?.name || 'document'}-extracted-text.txt`;
-                              document.body.appendChild(link);
-                              link.click();
-                              URL.revokeObjectURL(url);
-                              document.body.removeChild(link);
-                            }
-                          }}
-                        >
-                          <FileUp className="h-4 w-4 mr-2" />
-                          Download Text
-                        </Button>
-                      </div>
-                      <div className="p-4">
-                        <pre className="whitespace-pre-wrap break-words text-sm max-h-[550px] overflow-auto p-2">
-                          {extractedText}
+                {/* Add new extracted tab content */}
+                <TabsContent value="extracted" className="mt-0">
+                  <div className="border rounded-md overflow-hidden bg-muted/20 p-4">
+                    {documentSummary ? (
+                      <div>
+                        <h3 className="text-lg font-medium mb-2">Document Summary</h3>
+                        <pre className="bg-muted/50 p-3 rounded-md whitespace-pre-wrap text-sm mb-4">
+                          {documentSummary}
                         </pre>
                       </div>
+                    ) : (
+                      <div className="text-center text-muted-foreground p-4">
+                        No document summary available.
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="text" className="mt-0">
+                  {extractedText ? (
+                    <div className="bg-muted/10 p-4 rounded-md relative">
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="absolute top-2 right-2"
+                        onClick={() => {
+                          if (extractedText) {
+                            navigator.clipboard.writeText(extractedText);
+                            toast({
+                              title: "Copied to clipboard",
+                              description: "The extracted text has been copied to your clipboard",
+                            });
+                          }
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <pre className="text-xs whitespace-pre-wrap max-h-[500px] overflow-y-auto">
+                        {extractedText}
+                      </pre>
                     </div>
                   ) : (
-                    <div className="p-6 text-center text-muted-foreground">
-                      No extracted text available.
+                    <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground bg-muted/10 rounded-md min-h-[300px]">
+                      <FileText className="h-12 w-12 mb-4 text-muted-foreground/50" />
+                      <p>No text extracted yet</p>
+                      <p className="text-sm text-muted-foreground mt-2">Process the document to extract text</p>
                     </div>
                   )}
                 </TabsContent>
                 
                 <TabsContent value="redacted" className="mt-0">
-                  {redactedImageUrl ? (
-                    <div className="border rounded-md overflow-hidden bg-muted/20">
-                      <div className="flex justify-end mb-2 p-3">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => {
-                            // Use existing handleDownload function
-                            handleDownload();
-                          }}
-                        >
-                          <FileUp className="h-4 w-4 mr-2" />
-                          Download Redacted
-                        </Button>
-                      </div>
-                      <div className="max-h-[550px] overflow-auto p-3">
-                        <DocumentViewer 
-                          imageUrl={redactedImageUrl} 
-                          fileType="image/png"  // Redacted is always returned as PNG
-                        />
-                      </div>
+                  <div className="border rounded-md overflow-hidden bg-muted/20 p-1">
+                    <div className="flex justify-end mb-2 px-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => {
+                          // Download redacted document
+                          const link = document.createElement("a");
+                          if (redactedImageUrl) {
+                            // Download using the redacted image URL
+                            link.href = redactedImageUrl;
+                            link.download = `redacted-${file?.name || "document"}.png`;
+                            document.body.appendChild(link);
+                            link.click();
+                            URL.revokeObjectURL(redactedImageUrl);
+                            document.body.removeChild(link);
+                          }
+                        }}
+                      >
+                        <FileUp className="h-4 w-4 mr-2" />
+                        Download Redacted
+                      </Button>
                     </div>
-                  ) : (
-                    <div className="p-6 text-center text-muted-foreground">
-                      No redacted document available.
+                    <div className="max-h-[550px] overflow-auto p-3">
+                      <DocumentViewer 
+                        imageUrl={redactedImageUrl} 
+                        fileType={file?.type}
+                        onPdfLoadError={handlePdfViewerError}
+                      />
                     </div>
-                  )}
+                  </div>
                 </TabsContent>
               </Tabs>
             ) : (
