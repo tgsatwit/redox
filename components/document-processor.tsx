@@ -1137,7 +1137,29 @@ export function DocumentProcessor() {
             action: element.action // Add the action from the configuration
           } as ExtendedRedactionElement));
         
-        setExtractedElements([...elements, ...missingElements] as unknown as RedactionElement[]);
+        const allElements = [...elements, ...missingElements] as unknown as RedactionElement[];
+        setExtractedElements(allElements);
+        
+        // If extractSpecificElements option is selected, use GPT for more accurate matching
+        if (processingOptions.extractSpecificElements) {
+          try {
+            // Call the GPT matching API
+            const enhancedElements = await matchElementsWithGPT(elements, configuredElements);
+            if (enhancedElements) {
+              // Replace the elements with the enhanced ones, keeping the missing elements
+              setExtractedElements([...enhancedElements, ...missingElements] as unknown as RedactionElement[]);
+              
+              toast({
+                title: "Enhanced matching complete",
+                description: `Used AI to improve element matching accuracy`,
+                variant: "default"
+              });
+            }
+          } catch (matchError) {
+            console.error('Error in GPT element matching:', matchError);
+            // Continue with regular elements if GPT matching fails
+          }
+        }
         
         // Auto-select elements that should be redacted based on configuration
         const redactableElementIds = new Set(
@@ -2477,6 +2499,50 @@ ${extractedText.substring(0, 200)}...` : ''}
     saveDocument: false
   })
   const [retentionPeriod, setRetentionPeriod] = useState<string>("2years")
+
+  // New function to match elements using our GPT API
+  const matchElementsWithGPT = async (
+    extractedElements: ExtendedRedactionElement[],
+    configuredElements: DataElementConfig[]
+  ): Promise<ExtendedRedactionElement[] | null> => {
+    try {
+      console.log('Starting GPT element matching with', extractedElements.length, 'elements');
+      
+      // Prepare the request to the GPT matching API
+      const response = await fetch('/api/match-elements-with-gpt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          extractedElements: extractedElements,
+          documentTypeId: activeDocumentTypeId,
+          documentSubTypeId: selectedSubTypeId
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `GPT matching failed: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('GPT matching complete:', result.stats);
+      
+      if (result.elements && Array.isArray(result.elements)) {
+        return result.elements as ExtendedRedactionElement[];
+      }
+      return null;
+    } catch (error) {
+      console.error('Error in GPT element matching:', error);
+      toast({
+        title: "GPT matching failed",
+        description: error instanceof Error ? error.message : "An error occurred during AI matching",
+        variant: "destructive"
+      });
+      return null;
+    }
+  };
 
   return (
     <>

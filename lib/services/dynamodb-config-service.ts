@@ -47,9 +47,9 @@ const getDynamoDBConfig = () => {
   const localEndpoint = process.env.DYNAMODB_LOCAL_ENDPOINT;
   
   console.log('AWS Credentials:', {
-    region: process.env.AWS_REGION,
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID ? 'Set' : 'Not set',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ? 'Set' : 'Not set'
+    region: process.env.APP_REGION,
+    accessKeyId: process.env.APP_ACCESS_KEY_ID ? 'Set' : 'Not set',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY ? 'Set' : 'Not set'
   });
   
   if (localEndpoint) {
@@ -64,12 +64,12 @@ const getDynamoDBConfig = () => {
     };
   }
   
-  console.log('Using AWS DynamoDB in region:', process.env.AWS_REGION || 'us-east-1');
+  console.log('Using AWS DynamoDB in region:', process.env.APP_REGION || 'us-east-1');
   return {
-    region: process.env.AWS_REGION || 'us-east-1',
+    region: process.env.APP_REGION || 'us-east-1',
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+      accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
     }
   };
 };

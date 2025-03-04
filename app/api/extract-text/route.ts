@@ -12,11 +12,11 @@ import pdfParse from "pdf-parse"
 // We'll use a different approach for images
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_REGION || "us-east-1",
 })
 
 const textractClient = new TextractClient({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_REGION || "us-east-1",
 })
 
 export async function POST(request: Request) {
@@ -131,7 +131,7 @@ export async function POST(request: Request) {
       // Upload to S3
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: process.env.AWS_S3_BUCKET,
+          Bucket: process.env.APP_S3_BUCKET,
           Key: key,
           Body: fileBytes,
           ContentType: file.type,
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
         new DetectDocumentTextCommand({
           Document: {
             S3Object: {
-              Bucket: process.env.AWS_S3_BUCKET,
+              Bucket: process.env.APP_S3_BUCKET,
               Name: key,
             },
           },

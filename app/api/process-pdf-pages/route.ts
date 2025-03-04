@@ -6,17 +6,17 @@ import { join } from 'path';
 import * as os from 'os';
 
 // Check for required environment variables
-const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
+const AWS_ACCESS_KEY_ID = process.env.APP_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.APP_SECRET_ACCESS_KEY;
+const AWS_REGION = process.env.APP_REGION || 'us-east-1';
 // Check for both possible bucket name variables
-const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET;
+const AWS_S3_BUCKET = process.env.APP_S3_BUCKET;
 
 // Validate required environment variables
 const missingEnvVars: string[] = [];
-if (!AWS_ACCESS_KEY_ID) missingEnvVars.push('AWS_ACCESS_KEY_ID');
-if (!AWS_SECRET_ACCESS_KEY) missingEnvVars.push('AWS_SECRET_ACCESS_KEY');
-if (!AWS_S3_BUCKET) missingEnvVars.push('AWS_S3_BUCKET');
+if (!AWS_ACCESS_KEY_ID) missingEnvVars.push('APP_ACCESS_KEY_ID');
+if (!AWS_SECRET_ACCESS_KEY) missingEnvVars.push('APP_SECRET_ACCESS_KEY');
+if (!AWS_S3_BUCKET) missingEnvVars.push('APP_S3_BUCKET');
 
 // Initialize AWS SDK clients only if we have the required credentials
 let s3Client: S3Client | null = null;

@@ -30,11 +30,11 @@ export function AwsCredentialsHelper() {
               Create a <code>.env.local</code> file in your project root with the following variables:
             </p>
             <pre className="bg-slate-100 p-2 rounded text-xs overflow-x-auto dark:bg-slate-800">
-              {`AWS_REGION=your-region
-              AWS_ACCESS_KEY_ID=your-access-key
-              AWS_SECRET_ACCESS_KEY=your-secret-key
-              AWS_S3_BUCKET=your-bucket-name
-              AWS_TEXTRACT_ROLE_ARN=your-role-arn (optional)
+              {`APP_REGION=your-region
+              APP_ACCESS_KEY_ID=your-access-key
+              APP_SECRET_ACCESS_KEY=your-secret-key
+              APP_S3_BUCKET=your-bucket-name
+              APP_TEXTRACT_ROLE_ARN=your-role-arn (optional)
               `}
             </pre>
           </AccordionContent>

@@ -21,9 +21,9 @@ const getDynamoDBConfig = () => {
   
   // Otherwise, use AWS credentials
   const requiredEnvVars = [
-    'AWS_REGION', 
-    'AWS_ACCESS_KEY_ID', 
-    'AWS_SECRET_ACCESS_KEY'
+    'APP_REGION', 
+    'APP_ACCESS_KEY_ID', 
+    'APP_SECRET_ACCESS_KEY'
   ];
   
   for (const envVar of requiredEnvVars) {
@@ -33,10 +33,10 @@ const getDynamoDBConfig = () => {
   }
   
   return {
-    region: process.env.AWS_REGION,
+    region: process.env.APP_REGION,
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+      accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
     }
   };
 };
