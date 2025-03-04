@@ -32,7 +32,7 @@ interface ManualSelection {
 }
 
 interface DocumentViewerProps {
-  imageUrl: string
+  imageUrl: string | null
   fileType?: string
   extractedText?: string
   textError?: string
@@ -71,6 +71,15 @@ export function DocumentViewer({
   redactionElements = [],
   onSelectionAdded
 }: DocumentViewerProps) {
+  // If no image URL is provided, show a placeholder
+  if (!imageUrl) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-muted/10 rounded-md">
+        <p className="text-muted-foreground">No image available</p>
+      </div>
+    );
+  }
+
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
   const [isPdf, setIsPdf] = useState(false)
@@ -181,7 +190,7 @@ export function DocumentViewer({
       setPdfLoadError(`Failed to load PDF: ${error instanceof Error ? error.message : String(error)}`);
       
       if (onPdfLoadError) {
-        onPdfLoadError(`Failed to load PDF: ${error instanceof Error ? error.message : String(error)}`);
+        onPdfLoadError(error instanceof Error ? error.message : String(error));
       }
       
       return false;
@@ -201,9 +210,14 @@ export function DocumentViewer({
   
   // Effects that manage PDF loading and rendering
   useEffect(() => {
+    // If imageUrl is null, don't proceed
+    if (!imageUrl) {
+      return;
+    }
+    
     // Reset PDF state when imageUrl or fileType changes
     setIsPdf(Boolean(
-      imageUrl?.endsWith('.pdf') || 
+      imageUrl.endsWith('.pdf') || 
       fileType === 'application/pdf' || 
       (imageUrl && isPdfDataUrl(imageUrl))
     ));

@@ -2219,7 +2219,9 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
         }
         
         // Try to find a match using our mapping function
-        const matchingConfig = findMatchingElement((element as ExtendedRedactionElement).label, configuredElements);
+        const label = (element as ExtendedRedactionElement).label;
+        // Ensure label is a string before passing to findMatchingElement
+        const matchingConfig = label ? findMatchingElement(label, configuredElements) : null;
         
         if (matchingConfig) {
           // Found a match
@@ -2283,7 +2285,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
       // Log bounding boxes for matched elements for verification
       console.log("BOUNDING BOX CHECK - Matched elements:");
       matchedElements.forEach(el => {
-        console.log(`${el.label || el.name || el.id} bounding box:`, el.boundingBox);
+        console.log(`${el.label || el.id} bounding box:`, el.boundingBox);
       });
       
       // Update state with all elements
@@ -2356,7 +2358,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
       
       // For demo purposes, create a simple summary from the extracted elements
       const formattedElements = extractedElements
-        .filter(el => el.value || el.text)
+        .filter(el => (el as ExtendedRedactionElement).value || el.text)
         .map(el => {
           const elementName = (el as ExtendedRedactionElement).label || el.id;
           const elementValue = (el as ExtendedRedactionElement).value || el.text || 'N/A';
@@ -2419,7 +2421,7 @@ ${extractedText.substring(0, 200)}...` : ''}
       // Prepare document metadata
       const documentMetadata = {
         documentType: activeDocType?.name || 'Unknown',
-        documentSubType: selectedSubTypeId ? 
+        documentSubType: selectedSubTypeId && activeDocType ? 
           (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null,
         retention: retention,
         processedDate: new Date().toISOString(),
@@ -3175,11 +3177,17 @@ ${extractedText.substring(0, 200)}...` : ''}
                       </Button>
                     </div>
                     <div className="max-h-[550px] overflow-auto p-3">
-                      <DocumentViewer 
-                        imageUrl={redactedImageUrl} 
-                        fileType={file?.type}
-                        onPdfLoadError={handlePdfViewerError}
-                      />
+                      {redactedImageUrl ? (
+                        <DocumentViewer 
+                          imageUrl={redactedImageUrl as string} 
+                          fileType={file?.type}
+                          onPdfLoadError={handlePdfViewerError}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-64">
+                          <p className="text-muted-foreground">No redacted image available</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </TabsContent>
