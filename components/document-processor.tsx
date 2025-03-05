@@ -335,6 +335,7 @@ export function DocumentProcessor() {
   const [isClassifying, setIsClassifying] = useState(false)
   const [classificationResult, setClassificationResult] = useState<ClassificationResult | null>(null)
   const [verificationOpen, setVerificationOpen] = useState(false)
+  const [scanForTFN, setScanForTFN] = useState(true)
   const [manualSelections, setManualSelections] = useState<Array<{
     id: string;
     label: string;
@@ -351,7 +352,7 @@ export function DocumentProcessor() {
   
   // New state variables for the enhanced workflow
   const [workflowStep, setWorkflowStep] = useState<'upload' | 'classify' | 'process' | 'results'>('upload')
-  const [useTextExtractionForClassification, setUseTextExtractionForClassification] = useState(false)
+  const [useTextExtractionForClassification, setUseTextExtractionForClassification] = useState(true)
   const [isClassifyingWithGPT, setIsClassifyingWithGPT] = useState(false)
   const [gptClassificationResult, setGptClassificationResult] = useState<{
     documentType: string | null,
@@ -2643,6 +2644,21 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                         id="text-extract-classify" 
                         checked={useTextExtractionForClassification}
                         onCheckedChange={(checked) => setUseTextExtractionForClassification(checked)}
+                      />
+                    </div>
+
+                    {/* TFN Scanning option */}
+                    <div className="flex items-center justify-between mb-3 pb-3 border-b">
+                      <div>
+                        <p className="font-medium">Scan for TFN</p>
+                        <p className="text-sm text-muted-foreground">
+                          Detect and handle Tax File Numbers in the document
+                        </p>
+                      </div>
+                      <Switch 
+                        id="scan-tfn" 
+                        checked={scanForTFN}
+                        onCheckedChange={(checked) => setScanForTFN(checked)}
                       />
                     </div>
                     
