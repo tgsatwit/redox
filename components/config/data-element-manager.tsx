@@ -109,7 +109,10 @@ export function DataElementManager({
       await updateDataElement(
         documentType.id, 
         currentDataElement.id, 
-        currentDataElement
+        {
+          ...currentDataElement,
+          subTypeId: subTypeId || undefined
+        }
       )
       
       setEditElementOpen(false)

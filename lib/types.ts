@@ -78,9 +78,8 @@ export interface DocumentSubTypeConfig {
   name: string
   description?: string
   dataElements: DataElementConfig[]
-  awsAnalysisType?: 'TEXTRACT_ANALYZE_DOCUMENT' | 'TEXTRACT_ANALYZE_ID' | 'TEXTRACT_ANALYZE_EXPENSE'
-  isActive: boolean
-  documentTypeId?: string // Parent document type ID
+  awsAnalysisType?: string
+  isActive?: boolean
 }
 
 export interface DocumentTypeConfig {

@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { DataElementManager } from "@/components/config/data-element-manager"
 
 interface SubTypeManagerProps {
   documentType: DocumentTypeConfig;
@@ -240,43 +241,11 @@ export function SubTypeManager({
                         </p>
                       )}
                       
-                      {subType.dataElements && subType.dataElements.length > 0 ? (
-                        <div className="border rounded-md overflow-hidden">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Name</TableHead>
-                                <TableHead>Type</TableHead>
-                                <TableHead>Category</TableHead>
-                                <TableHead>Required</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {subType.dataElements.map((element) => (
-                                <TableRow key={element.id}>
-                                  <TableCell>
-                                    <div className="font-medium">{element.name}</div>
-                                    {element.description && (
-                                      <div className="text-xs text-muted-foreground">{element.description}</div>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>{element.type}</TableCell>
-                                  <TableCell>
-                                    <Badge variant="outline" className={getCategoryColor(element.category)}>
-                                      {element.category}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>{element.required ? "Yes" : "No"}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-muted-foreground text-center py-4">
-                          No data elements defined for this sub-type.
-                        </div>
-                      )}
+                      <DataElementManager
+                        documentType={documentType}
+                        subTypeId={subType.id}
+                        isLoading={isLoading}
+                      />
                     </div>
                   </CollapsibleContent>
                 </Collapsible>

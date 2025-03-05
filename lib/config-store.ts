@@ -112,13 +112,19 @@ export const useConfigStore = create<ConfigState>()(
             docType.id === documentTypeId 
               ? { 
                   ...docType, 
-                  dataElements: [
-                    ...docType.dataElements,
-                    {
-                      ...dataElement,
-                      id: uuidv4()
-                    }
-                  ]
+                  dataElements: dataElement.subTypeId 
+                    ? docType.dataElements // Don't add to document type if it's a sub-type element
+                    : [...docType.dataElements, { ...dataElement, id: uuidv4() }],
+                  subTypes: dataElement.subTypeId 
+                    ? docType.subTypes?.map(subType =>
+                        subType.id === dataElement.subTypeId
+                          ? {
+                              ...subType,
+                              dataElements: [...(subType.dataElements || []), { ...dataElement, id: uuidv4() }]
+                            }
+                          : subType
+                      )
+                    : docType.subTypes
                 } 
               : docType
           )
@@ -134,7 +140,13 @@ export const useConfigStore = create<ConfigState>()(
                   ...docType, 
                   dataElements: docType.dataElements.map(element => 
                     element.id === dataElementId ? { ...element, ...updates } : element
-                  )
+                  ),
+                  subTypes: docType.subTypes?.map(subType => ({
+                    ...subType,
+                    dataElements: subType.dataElements.map(element =>
+                      element.id === dataElementId ? { ...element, ...updates } : element
+                    )
+                  }))
                 } 
               : docType
           )
@@ -148,7 +160,11 @@ export const useConfigStore = create<ConfigState>()(
             docType.id === documentTypeId 
               ? { 
                   ...docType, 
-                  dataElements: docType.dataElements.filter(element => element.id !== dataElementId)
+                  dataElements: docType.dataElements.filter(element => element.id !== dataElementId),
+                  subTypes: docType.subTypes?.map(subType => ({
+                    ...subType,
+                    dataElements: subType.dataElements.filter(element => element.id !== dataElementId)
+                  }))
                 } 
               : docType
           )
