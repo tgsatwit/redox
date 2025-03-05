@@ -222,19 +222,22 @@ export function DocumentProcessor() {
               </div>
               
               <div className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    checked={processingState.processingOptions.extractSpecificElements}
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="extract-elements">Identify Data Elements</Label>
+                    <p className="text-xs text-muted-foreground">Identify and extract data elements</p>
+                  </div>
+                  <Switch 
+                    checked={processingState.processingOptions.identifyDataElements}
                     onCheckedChange={(checked) => 
                       updateProcessingState({
                         processingOptions: {
                           ...processingState.processingOptions,
-                          extractSpecificElements: checked as boolean
+                          identifyDataElements: checked as boolean
                         }
                       })
                     }
                   />
-                  <Label>Extract specific elements</Label>
                 </div>
                 
                 <div className="flex items-center space-x-2">
@@ -271,7 +274,7 @@ export function DocumentProcessor() {
               <div className="flex gap-2 pt-4">
                 <Button 
                   onClick={handleProcessDocument}
-                  disabled={processingState.isProcessing || (!processingState.processingOptions.extractSpecificElements && !processingState.processingOptions.redactElements && !processingState.processingOptions.createSummary)}
+                  disabled={processingState.isProcessing || (!processingState.processingOptions.identifyDataElements && !processingState.processingOptions.redactElements && !processingState.processingOptions.createSummary)}
                   className="flex-1"
                 >
                   {processingState.isProcessing ? (

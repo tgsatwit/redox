@@ -57,7 +57,7 @@ export interface ProcessingOptions extends ProcessOptions {
 }
 
 export interface ProcessingOptionsState {
-  extractSpecificElements: boolean;
+  identifyDataElements: boolean;
   redactElements: boolean;
   createSummary: boolean;
   saveDocument: {

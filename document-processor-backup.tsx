@@ -125,88 +125,91 @@ const FIELD_MAPPING_TABLE: Record<string, string[]> = {
  * Find a matching configured element for an extracted field using the mapping table
  */
 const findMatchingElement = (extractedLabel: string, configuredElements: DataElementConfig[]): DataElementConfig | null => {
-  if (!extractedLabel || !configuredElements?.length) return null;
+  if (!extractedLabel || !configuredElements?.length) {
+    return null;
+  }
 
   console.log(`Looking for match for label: ${extractedLabel}`);
-
-  // Normalize the text for comparison (lowercase, remove spaces and special chars)
-  const normalizeText = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const normalizedLabel = normalizeText(extractedLabel);
   
-  // Common document field mappings for passport and IDs
-  // This maps the extracted field names to standard config names
-  const commonFieldMappings: Record<string, string> = {
-    'DOCUMENT_NUMBER': 'Passport Number',
-    'PASSPORT_NUMBER': 'Passport Number',
-    'DATE_OF_ISSUE': 'Issue Date',
-    'ISSUE_DATE': 'Issue Date',
-    'DATE_OF_BIRTH': 'Date of Birth',
-    'EXPIRATION_DATE': 'Expiration Date',
-    'DATE_OF_EXPIRY': 'Expiration Date',
+  // Direct exact matches for underscore format fields - highest priority
+  // This is a special case for fields like FIRST_NAME, LAST_NAME, etc.
+  const directHumanReadableMap: Record<string, string> = {
     'FIRST_NAME': 'First Name',
     'LAST_NAME': 'Last Name',
-    'NATIONALITY': 'Nationality',
+    'MIDDLE_NAME': 'Middle Name',
+    'FULL_NAME': 'Full Name',
+    'DATE_OF_BIRTH': 'Date of Birth',
+    'DATE_OF_ISSUE': 'Date of Issue',
+    'DATE_OF_EXPIRY': 'Expiration Date',
+    'EXPIRATION_DATE': 'Expiration Date',
+    'DOCUMENT_NUMBER': 'Document Number',
+    'PASSPORT_NUMBER': 'Passport Number',
+    'MRZ_CODE': 'MRZ Code',
     'PLACE_OF_BIRTH': 'Place of Birth'
   };
-
-  // First try direct mapping from extracted underscore format to config names
-  if (commonFieldMappings[extractedLabel]) {
-    const configName = commonFieldMappings[extractedLabel];
+  
+  // First priority: direct mapping from underscore format to human readable
+  if (directHumanReadableMap[extractedLabel]) {
+    const humanReadableName = directHumanReadableMap[extractedLabel];
     const matchingElement = configuredElements.find(
-      element => element.name.toLowerCase() === configName.toLowerCase()
+      element => element.name.toLowerCase() === humanReadableName.toLowerCase()
     );
     
     if (matchingElement) {
-      console.log(`✅ Found direct field mapping match: "${extractedLabel}" → "${matchingElement.name}"`);
+      console.log(`✅ Found direct underscore format match: "${extractedLabel}" → "${matchingElement.name}"`);
       return matchingElement;
     }
   }
 
-  // Try exact name match or alias match
-  for (const element of configuredElements) {
-    // Check for exact name match (case insensitive)
-    if (normalizeText(element.name) === normalizedLabel) {
-      console.log(`✅ Found exact name match: "${extractedLabel}" → "${element.name}"`);
-      return element;
-    }
+  // Normalize the extracted label
+  const normalizedLabel = extractedLabel
+    .toUpperCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^A-Z0-9_]/g, '');
+  
+  // Second priority: entry in our mapping table
+  if (FIELD_MAPPING_TABLE[normalizedLabel]) {
+    const potentialMatches = FIELD_MAPPING_TABLE[normalizedLabel];
     
-    // Check aliases if available
-    if (element.aliases && element.aliases.length > 0) {
-      const matchingAlias = element.aliases.find(alias => 
-        normalizeText(alias) === normalizedLabel
+    for (const potentialMatch of potentialMatches) {
+      const matchingElement = configuredElements.find(
+        element => element.name.toLowerCase() === potentialMatch.toLowerCase()
       );
       
-      if (matchingAlias) {
-        console.log(`✅ Found alias match: "${extractedLabel}" (alias: "${matchingAlias}") → "${element.name}"`);
-        return element;
+      if (matchingElement) {
+        console.log(`✅ Found mapping table match: "${normalizedLabel}" → "${matchingElement.name}"`);
+        return matchingElement;
       }
     }
   }
   
-  // Try partial matches - more flexible matching
-  for (const element of configuredElements) {
-    const normalizedElementName = normalizeText(element.name);
+  // Third priority: try normalizing the configured element names and compare
+  const matchByNormalization = configuredElements.find(element => {
+    const normalizedConfigName = element.name
+      .toUpperCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Z0-9_]/g, '');
     
-    // If element name contains the extracted label or vice versa
-    if (normalizedElementName.includes(normalizedLabel) || normalizedLabel.includes(normalizedElementName)) {
-      console.log(`✅ Found partial match: "${extractedLabel}" ↔ "${element.name}"`);
+    return normalizedConfigName === normalizedLabel;
+  });
+  
+  if (matchByNormalization) {
+    console.log(`✅ Found normalized name match: "${normalizedLabel}" → "${matchByNormalization.name}"`);
+    return matchByNormalization;
+  }
+  
+  // Last priority: fuzzy match by substring inclusion
+  for (const element of configuredElements) {
+    const normalizedConfigName = element.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const normalizedExtractedNoUnderscores = normalizedLabel.replace(/_/g, '');
+    
+    if (normalizedConfigName.includes(normalizedExtractedNoUnderscores) || 
+        normalizedExtractedNoUnderscores.includes(normalizedConfigName)) {
+      console.log(`✅ Found fuzzy substring match: "${normalizedLabel}" → "${element.name}"`);
       return element;
     }
-    
-    // Check partial matches with aliases
-    if (element.aliases && element.aliases.length > 0) {
-      const partialAliasMatch = element.aliases.find(alias => {
-        const normalizedAlias = normalizeText(alias);
-        return normalizedAlias.includes(normalizedLabel) || normalizedLabel.includes(normalizedAlias);
-      });
-      
-      if (partialAliasMatch) {
-        console.log(`✅ Found partial alias match: "${extractedLabel}" ↔ "${partialAliasMatch}" → "${element.name}"`);
-        return element;
-      }
-    }
   }
-
+  
   console.log(`❌ No match found for: "${extractedLabel}"`);
   return null;
 };
@@ -728,6 +731,7 @@ export function DocumentProcessor() {
     
     try {
       console.log('Starting processing workflow');
+      console.log('Using field mapping table with', Object.keys(FIELD_MAPPING_TABLE).length, 'field mappings');
       
       // Always ensure text extraction is done first if not already available
       if (!extractedText) {
@@ -738,53 +742,28 @@ export function DocumentProcessor() {
         await handleExtractText();
       }
       
-      // Track if we need to reselect elements for redaction
-      let needToReselectElements = false;
+      const processes = [];
       
       // Extract specific elements
       if (processingOptions.identifyDataElements) {
         console.log('Starting element extraction...');
-        await handleProcessDocument();
-        // Since handleProcessDocument was called, we need to reselect elements
-        needToReselectElements = true;
+        processes.push(handleProcessDocument());
       }
+      
+      // Wait for all selected processes to complete
+      await Promise.all(processes);
+      console.log('All selected processes completed');
       
       // After processing, if redaction is selected and we have elements, apply redactions
       if (processingOptions.redactElements && extractedElements.length > 0) {
         console.log('Starting automatic redaction...');
         
-        // If we processed elements, we need to reselect elements for redaction
-        if (needToReselectElements) {
-          // Auto-select elements that should be redacted based on configuration
-          const configuredElements = getConfiguredDataElements();
-          const redactableElementIds = new Set(
-            extractedElements
-              .filter(element => {
-                const typedElement = element as unknown as ExtendedRedactionElement;
-                // Check if it has a redact action from configuration
-                return typedElement.action === 'Redact' || typedElement.action === 'ExtractAndRedact';
-              })
-              .map(element => element.id)
-          );
-          
-          // Update selected elements
-          setSelectedElements(Array.from(redactableElementIds));
-          console.log(`Auto-selected ${redactableElementIds.size} elements for redaction based on configuration`);
-          
-          // Small delay to ensure state is updated before proceeding
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        // Apply redactions if there are selected elements
-        if (selectedElements.length > 0) {
-          console.log(`Applying redactions to ${selectedElements.length} elements`);
+        // Apply redactions
+        if (fieldsToRedact.size > 0) {
+          console.log(`Applying redactions to ${fieldsToRedact.size} fields`);
           await handleApplyRedactions();
         } else {
-          toast({
-            title: "No elements selected",
-            description: "Please select elements to redact from the data elements table",
-            variant: "destructive"
-          });
+          console.log('No fields selected for redaction');
         }
       }
       
@@ -799,25 +778,16 @@ export function DocumentProcessor() {
         console.log('Saving document(s) with retention policies...');
         await saveDocumentWithRetention();
       }
-      
-      setIsProcessing(false);
-      setWorkflowStep('results');
-      
-      toast({
-        title: "Processing complete",
-        description: "All selected processes have been completed successfully",
-        variant: "default"
-      });
     } catch (error) {
       console.error('Error in processing workflow:', error);
-      setProcessError(`Error: ${(error as Error).message}`);
-      setIsProcessing(false);
-      
+      setProcessError(error instanceof Error ? error.message : 'An unknown error occurred');
       toast({
-        title: "Processing error",
-        description: `Error: ${(error as Error).message}`,
+        title: "Processing Error",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
         variant: "destructive"
       });
+    } finally {
+      setIsProcessing(false);
     }
   };
   
@@ -2987,11 +2957,12 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                     <div className="flex items-center justify-between border-b pb-2">
                       <div className="space-y-0.5">
                         <Label htmlFor="extract-elements">Identify Data Elements</Label>
+                        <Label htmlFor="extract-elements">Extract Specific Elements</Label>
                         <p className="text-xs text-muted-foreground">Identify and extract data elements</p>
                       </div>
                       <Switch 
-                        checked={processingOptions.identifyDataElements}
-                        onCheckedChange={() => handleProcessOptionChange('identifyDataElements')}
+                        checked={processingOptions.extractSpecificElements}
+                        onCheckedChange={() => handleProcessOptionChange('extractSpecificElements')}
                       />
                     </div>
 

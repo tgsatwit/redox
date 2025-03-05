@@ -4,9 +4,92 @@ import { processDocument, classifyDocument, submitClassificationFeedback } from 
 import { redactDocument } from "@/lib/redaction";
 import { convertPdfToBase64 } from "@/lib/pdf-utils";
 import { ensurePdfJsLoaded, reloadPdfJs } from "@/lib/pdf-preloader";
-import { DocumentProcessorState, ExtendedRedactionElement, ProcessingOptions, UseDocumentProcessorReturn, ProcessingResult } from '../types';
+import { 
+  DocumentProcessorState, 
+  ExtendedRedactionElement, 
+  ProcessingOptions, 
+  UseDocumentProcessorReturn, 
+  ProcessingResult,
+  AnyBoundingBox
+} from '../types';
+import { 
+  DataElementConfig,
+  DataElementType,
+  DataElementCategory,
+  DataElementAction,
+  DocumentTypeConfig
+} from '@/lib/types';
 import { useToast } from "@/components/ui/use-toast";
 import { getPdfPageCount, convertBase64ToFile } from '../utils/document-utils';
+
+// Move matchDataElements function definition before its usage
+const matchDataElements = (extractedElements: ExtendedRedactionElement[], configuredElements: DataElementConfig[]) => {
+  const matches: ExtendedRedactionElement[] = [];
+  const unmatchedExtracted: ExtendedRedactionElement[] = [];
+  
+  // Helper function to normalize text for comparison
+  const normalizeText = (text: string) => text.toLowerCase().trim();
+  
+  // Process each extracted element
+  extractedElements.forEach(extracted => {
+    let matched = false;
+    
+    // Try to find a match in configured elements
+    for (const configured of configuredElements) {
+      const extractedLabel = normalizeText(extracted.label || '');
+      const configuredName = normalizeText(configured.name);
+      const aliases = (configured.aliases || []).map(normalizeText);
+      
+      // Check for direct match or match with aliases
+      if (extractedLabel === configuredName || aliases.includes(extractedLabel)) {
+        matches.push({
+          ...extracted,
+          id: configured.id,  // Use configured element ID
+          label: configured.name,  // Use configured element name
+          type: configured.type,
+          category: configured.category,
+          isConfigured: true,
+          action: configured.action as any, // Workaround for type incompatibility
+          boundingBox: extracted.boundingBox || null  // Ensure boundingBox is not undefined
+        });
+        matched = true;
+        break;
+      }
+    }
+    
+    // If no match found, add to unmatched list
+    if (!matched) {
+      unmatchedExtracted.push({
+        ...extracted,
+        boundingBox: extracted.boundingBox || null  // Ensure boundingBox is not undefined
+      });
+    }
+  });
+  
+  // Create placeholders for configured elements that weren't matched
+  const unmatchedConfigured = configuredElements
+    .filter(configured => !matches.some(match => match.id === configured.id))
+    .map(configured => ({
+      id: configured.id,
+      label: configured.name,
+      text: '',
+      value: null,
+      confidence: 0,
+      boundingBox: null,
+      pageIndex: 0,
+      type: configured.type,
+      category: configured.category,
+      isConfigured: true,
+      missing: true,
+      action: configured.action
+    } as ExtendedRedactionElement));
+  
+  return {
+    matches,
+    unmatchedExtracted,
+    unmatchedConfigured
+  };
+};
 
 export function useDocumentProcessor(): UseDocumentProcessorReturn {
   const { config, activeDocumentTypeId, setActiveDocumentType } = useConfigStoreDB();
@@ -48,7 +131,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
     isClassifyingWithGPT: false,
     gptClassificationResult: null,
     processingOptions: {
-      extractSpecificElements: false,
+      identifyDataElements: false,
       redactElements: false,
       createSummary: false,
       saveDocument: {
@@ -63,13 +146,15 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
     setState(prev => ({ ...prev, ...updates }));
   }, []);
 
-  // Get configured data elements
+  // Get configured data elements with aliases - update return type to match UseDocumentProcessorReturn
   const getConfiguredDataElements = useCallback(() => {
+    // This now returns synchronously to match the expected return type
     if (!activeDocumentTypeId) return [];
     
     const docType = config.documentTypes.find(dt => dt.id === activeDocumentTypeId);
     if (!docType) return [];
     
+    // Get data elements based on sub-type or document type
     if (state.selectedSubTypeId) {
       const subType = docType.subTypes?.find(st => st.id === state.selectedSubTypeId);
       if (subType) {
@@ -77,8 +162,52 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
       }
     }
     
-    return docType.dataElements;
+    return docType.dataElements || [];
   }, [activeDocumentTypeId, config.documentTypes, state.selectedSubTypeId]);
+  
+  // New function to asynchronously fetch data elements with aliases
+  const fetchConfiguredDataElements = useCallback(async () => {
+    if (!activeDocumentTypeId) return [];
+    
+    try {
+      // Get document type configuration from DynamoDB
+      const response = await fetch(`/api/document-types/${activeDocumentTypeId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch document type configuration');
+      }
+      
+      const docType = await response.json();
+      if (!docType) return [];
+      
+      // Get data elements based on sub-type or document type
+      let dataElements: DataElementConfig[] = [];
+      if (state.selectedSubTypeId && docType.subTypes) {
+        const subType = docType.subTypes.find((st: { id: string }) => st.id === state.selectedSubTypeId);
+        if (subType) {
+          dataElements = subType.dataElements;
+        }
+      }
+      
+      // If no sub-type or no elements found in sub-type, use document type elements
+      if (dataElements.length === 0) {
+        dataElements = docType.dataElements || [];
+      }
+      
+      // Enhance data elements with aliases
+      return dataElements.map((element: DataElementConfig) => ({
+        ...element,
+        aliases: element.aliases || []  // Include aliases array if it exists
+      }));
+    } catch (error) {
+      console.error('Error fetching data elements:', error);
+      toast({
+        title: "Error fetching data elements",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive"
+      });
+      return [];
+    }
+  }, [activeDocumentTypeId, state.selectedSubTypeId, toast]);
 
   // Handle file upload
   const handleFileUpload = useCallback(async (file: File | null) => {
@@ -318,7 +447,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
       isClassifyingWithGPT: false,
       gptClassificationResult: null,
       processingOptions: {
-        extractSpecificElements: false,
+        identifyDataElements: false,
         redactElements: false,
         createSummary: false,
         saveDocument: {
@@ -329,6 +458,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
     });
   }, [updateState]);
 
+  // Update handleProcessPageByPage to use the fetchConfiguredDataElements function
   const handleProcessPageByPage = useCallback(async () => {
     if (!state.file) return;
     
@@ -341,6 +471,9 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
         showAwsHelper: false
       });
       
+      // Get configured data elements first - using async fetch method
+      const configuredElements = await fetchConfiguredDataElements();
+      
       // Process the PDF page by page
       const docData = await processDocument(
         state.file,
@@ -348,39 +481,45 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
           documentType: config.documentTypes.find(dt => dt.id === activeDocumentTypeId)?.name || '',
           subType: state.selectedSubTypeId ? 
             config.documentTypes.find(dt => dt.id === activeDocumentTypeId)?.subTypes?.find(st => st.id === state.selectedSubTypeId)?.name : undefined,
-          elementsToExtract: getConfiguredDataElements(),
+          elementsToExtract: configuredElements,
           onProgress: (status: string, progress: number, total: number) => {
             updateState({
               processingStatus: status,
               processingProgress: Math.floor((progress / total) * 100)
             });
           }
-        } as ProcessingOptions,
+        } as unknown as ProcessingOptions,
         false
       );
 
-      const result: ProcessingResult = {
-        success: true,
-        documentData: docData,
-        extractedFields: docData.extractedFields?.map(field => ({
-          id: field.id,
-          value: field.value || '',
-          confidence: field.confidence,
-          boundingBox: field.boundingBox || null
-        }))
-      };
-      
-      // Update state with the extracted text and elements
+      // Convert extracted fields to ExtendedRedactionElement format
+      const extractedElements = docData.extractedFields?.map(field => ({
+        id: field.id,
+        text: field.value || '',
+        value: field.value,
+        confidence: field.confidence,
+        boundingBox: field.boundingBox || null, // Ensure never undefined
+        pageIndex: 0,
+        label: field.label
+      } as ExtendedRedactionElement)) || [];
+
+      // Match extracted elements with configured elements
+      const { matches, unmatchedExtracted, unmatchedConfigured } = matchDataElements(extractedElements, configuredElements);
+
+      // Convert to RedactionElement[] to satisfy type constraints
+      const redactionElements = [...matches, ...unmatchedExtracted, ...unmatchedConfigured].map(el => ({
+        id: el.id,
+        text: el.text,
+        confidence: el.confidence,
+        pageIndex: el.pageIndex,
+        boundingBox: el.boundingBox || null // Ensure never undefined
+      }));
+
+      // Update state with all elements
       updateState({
-        documentData: result.documentData,
-        extractedText: result.documentData.extractedText || '',
-        extractedElements: result.extractedFields?.map(field => ({
-          id: field.id,
-          text: field.value,
-          confidence: field.confidence,
-          pageIndex: 0,
-          boundingBox: field.boundingBox
-        })) || [],
+        documentData: docData,
+        extractedText: docData.extractedText || '',
+        extractedElements: redactionElements,
         isProcessingPageByPage: false,
         processingStatus: 'Processing complete!',
         processingProgress: 100
@@ -388,7 +527,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
       
       toast({
         title: "Page-by-page processing complete",
-        description: `Processed ${result.totalPages || 0} pages successfully`,
+        description: `Processed document successfully`,
         variant: "default"
       });
     } catch (error) {
@@ -415,7 +554,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
         isProcessingPageByPage: false
       });
     }
-  }, [state.file, activeDocumentTypeId, config.documentTypes, state.selectedSubTypeId, getConfiguredDataElements, updateState, toast]);
+  }, [state.file, activeDocumentTypeId, config.documentTypes, state.selectedSubTypeId, fetchConfiguredDataElements, matchDataElements, updateState, toast]);
 
   const handleClassifyDocument = useCallback(async () => {
     if (!state.file) return;

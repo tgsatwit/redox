@@ -47,7 +47,7 @@ export function useDocumentProcessing() {
     isClassifyingWithGPT: false,
     gptClassificationResult: null,
     processingOptions: {
-      extractSpecificElements: false,
+      identifyDataElements: false,
       redactElements: false,
       createSummary: false,
       saveDocument: {
@@ -95,7 +95,7 @@ export function useDocumentProcessing() {
         processError: null,
         showAwsHelper: false,
         processingOptions: {
-          extractSpecificElements: false,
+          identifyDataElements: false,
           redactElements: false,
           createSummary: false,
           saveDocument: {
@@ -117,7 +117,7 @@ export function useDocumentProcessing() {
             });
           },
           elementsToExtract: [],
-          extractSpecificElements: false,
+          identifyDataElements: false,
           redactElements: false,
           createSummary: false,
           saveDocument: {
@@ -391,7 +391,7 @@ export function useDocumentProcessing() {
       isClassifyingWithGPT: false,
       gptClassificationResult: null,
       processingOptions: {
-        extractSpecificElements: false,
+        identifyDataElements: false,
         redactElements: false,
         createSummary: false,
         saveDocument: {
