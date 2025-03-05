@@ -6,7 +6,11 @@ import sharp from "sharp"
 import { Buffer } from "buffer"
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
+  }
 })
 
 export async function POST(request: Request) {
@@ -67,7 +71,7 @@ export async function POST(request: Request) {
       // Upload the PDF to S3
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: process.env.AWS_S3_BUCKET,
+          Bucket: process.env.APP_S3_BUCKET,
           Key: key,
           Body: fileBytes,
           ContentType: "application/pdf",
@@ -113,20 +117,20 @@ export async function POST(request: Request) {
     
     // Generate a unique ID for the redacted file
     const redactedFileId = createId()
-    const key = `redacted/${redactedFileId}.png`
+    const redactedKey = `redacted/${redactedFileId}.png`
     
     // Upload the redacted image to S3
     await s3Client.send(
       new PutObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET,
-        Key: key,
+        Bucket: process.env.APP_S3_BUCKET,
+        Key: redactedKey,
         Body: processedImage,
         ContentType: "image/png",
       })
     )
     
     // Create a pre-signed URL for the redacted image
-    const publicUrl = `${process.env.NEXT_PUBLIC_S3_URL}/${key}`
+    const publicUrl = `${process.env.NEXT_PUBLIC_S3_URL}/${redactedKey}`
     
     // Return the URL of the redacted image
     return NextResponse.json({

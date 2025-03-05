@@ -3,7 +3,11 @@ import { createId } from "@paralleldrive/cuid2"
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
+  }
 })
 
 // This endpoint uploads the PDF to S3 and returns HTML for embedding it
@@ -45,16 +49,16 @@ export async function POST(request: Request) {
       // Upload to S3
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: process.env.AWS_S3_BUCKET,
+          Bucket: process.env.APP_S3_BUCKET,
           Key: key,
           Body: fileBytes,
           ContentType: file.type,
-          ACL: 'public-read', // Make publicly accessible for viewing
+          ContentDisposition: "inline", // Important for PDFs to display properly
         })
       )
       
-      // Construct the S3 URL
-      const s3Url = `https://${process.env.AWS_S3_BUCKET}.s3.amazonaws.com/${key}`
+      // Create URL for accessing the file
+      const s3Url = `https://${process.env.APP_S3_BUCKET}.s3.amazonaws.com/${key}`
       console.log(`PDF uploaded for preview at: ${s3Url}`)
       
       // Generate HTML for embedding the PDF

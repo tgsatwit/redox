@@ -7,12 +7,12 @@ import * as os from 'os';
 import { PDFDocument } from 'pdf-lib';
 
 // Setup AWS SDK clients
-const region = process.env.AWS_REGION || 'us-east-1';
+const region = process.env.APP_REGION || 'us-east-1';
 const clientConfig = {
   region,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
   }
 };
 
@@ -20,11 +20,11 @@ const s3Client = new S3Client(clientConfig);
 const textractClient = new TextractClient(clientConfig);
 
 // Get the S3 bucket name from environment variables
-const bucketName = process.env.AWS_S3_BUCKET;
+const bucketName = process.env.APP_S3_BUCKET;
 
 // Validate required environment variables
 if (!bucketName) {
-  console.error('Missing required environment variable: AWS_S3_BUCKET');
+  console.error('Missing required environment variable: APP_S3_BUCKET');
 }
 
 // Define the type for Textract blocks

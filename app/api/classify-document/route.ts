@@ -44,9 +44,9 @@ function toValidLanguageCode(code: string): LanguageCode {
 // Get AWS credentials from environment
 const getAwsCredentials = () => {
   const requiredEnvVars = [
-    'AWS_REGION', 
-    'AWS_ACCESS_KEY_ID', 
-    'AWS_SECRET_ACCESS_KEY'
+    'APP_REGION', 
+    'APP_ACCESS_KEY_ID', 
+    'APP_SECRET_ACCESS_KEY'
   ];
   
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -56,10 +56,10 @@ const getAwsCredentials = () => {
   }
   
   return {
-    region: process.env.AWS_REGION!,
+    region: process.env.APP_REGION!,
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      accessKeyId: process.env.APP_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.APP_SECRET_ACCESS_KEY!,
     }
   };
 };
@@ -136,11 +136,11 @@ export async function POST(request: Request) {
       const fileHash = crypto.createHash('md5').update(Buffer.from(fileBytes)).digest('hex');
       s3Key = `temp-docs/${fileHash}-${uploadedFile.name}`;
       // Handle possibly undefined environment variables
-      const envBucketName = process.env.AWS_S3_BUCKET || null;
+      const envBucketName = process.env.APP_S3_BUCKET || null;
       bucketName = envBucketName;
       
       if (!bucketName) {
-        throw new Error('AWS_S3_BUCKET environment variable is not set');
+        throw new Error('APP_S3_BUCKET environment variable is not set');
       }
 
       // Upload file to S3

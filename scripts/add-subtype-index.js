@@ -5,7 +5,7 @@ const { DynamoDBClient, UpdateTableCommand } = require('@aws-sdk/client-dynamodb
 const getDynamoDBConfig = () => {
   // Use local configuration with AWS profile if necessary
   const config = {
-    region: process.env.AWS_REGION || 'ap-southeast-2',
+    region: process.env.APP_REGION || 'ap-southeast-2',
   };
 
   // For local development or endpoints

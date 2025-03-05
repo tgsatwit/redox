@@ -4,10 +4,10 @@ require('dotenv').config({ path: '.env.local' });
 
 // Get AWS credentials from environment
 const awsConfig = {
-  region: process.env.AWS_REGION,
+  region: process.env.APP_REGION,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    accessKeyId: process.env.APP_ACCESS_KEY_ID,
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY
   }
 };
 

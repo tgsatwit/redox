@@ -7,11 +7,19 @@ import {
 import { createId } from "@paralleldrive/cuid2"
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
+  }
 })
 
 const textractClient = new TextractClient({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
+  }
 })
 
 export async function POST(request: Request) {
@@ -52,7 +60,7 @@ export async function POST(request: Request) {
     
     await s3Client.send(
       new PutObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET,
+        Bucket: process.env.APP_S3_BUCKET,
         Key: key,
         Body: fileBytes,
         ContentType: file.type,
@@ -65,7 +73,7 @@ export async function POST(request: Request) {
         DocumentPages: [
           {
             S3Object: {
-              Bucket: process.env.AWS_S3_BUCKET,
+              Bucket: process.env.APP_S3_BUCKET,
               Name: key,
             },
           },

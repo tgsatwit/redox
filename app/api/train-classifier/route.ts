@@ -14,9 +14,9 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Function to get AWS credentials
 const getAwsCredentials = () => {
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-  const region = process.env.AWS_REGION || 'us-east-1';
+  const accessKeyId = process.env.APP_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.APP_SECRET_ACCESS_KEY;
+  const region = process.env.APP_REGION || 'ap-southeast-2';
   
   if (!accessKeyId || !secretAccessKey) {
     console.warn('AWS credentials not found in environment variables');
@@ -71,9 +71,9 @@ export async function POST(request: Request) {
     }
     
     // Get the S3 bucket name from environment variables
-    const s3Bucket = process.env.AWS_S3_BUCKET;
-    const comprehendTrainingRoleArn = process.env.AWS_COMPREHEND_ROLE_ARN;
-    const stepFunctionArn = process.env.AWS_STEP_FUNCTION_TRAINING_ARN;
+    const s3Bucket = process.env.APP_S3_BUCKET;
+    const comprehendTrainingRoleArn = process.env.APP_COMPREHEND_ROLE_ARN;
+    const stepFunctionArn = process.env.APP_STEP_FUNCTION_TRAINING_ARN;
     
     // Check if required environment variables are set
     if (!s3Bucket) {

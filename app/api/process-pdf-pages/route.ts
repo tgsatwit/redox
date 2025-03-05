@@ -6,17 +6,17 @@ import { join } from 'path';
 import * as os from 'os';
 
 // Check for required environment variables
-const AWS_ACCESS_KEY_ID = process.env.APP_ACCESS_KEY_ID;
-const AWS_SECRET_ACCESS_KEY = process.env.APP_SECRET_ACCESS_KEY;
-const AWS_REGION = process.env.APP_REGION || 'us-east-1';
+const APP_ACCESS_KEY_ID = process.env.APP_ACCESS_KEY_ID;
+const APP_SECRET_ACCESS_KEY = process.env.APP_SECRET_ACCESS_KEY;
+const APP_REGION = process.env.APP_REGION || 'us-east-1';
 // Check for both possible bucket name variables
-const AWS_S3_BUCKET = process.env.APP_S3_BUCKET;
+const APP_S3_BUCKET = process.env.APP_S3_BUCKET;
 
 // Validate required environment variables
 const missingEnvVars: string[] = [];
-if (!AWS_ACCESS_KEY_ID) missingEnvVars.push('APP_ACCESS_KEY_ID');
-if (!AWS_SECRET_ACCESS_KEY) missingEnvVars.push('APP_SECRET_ACCESS_KEY');
-if (!AWS_S3_BUCKET) missingEnvVars.push('APP_S3_BUCKET');
+if (!APP_ACCESS_KEY_ID) missingEnvVars.push('APP_ACCESS_KEY_ID');
+if (!APP_SECRET_ACCESS_KEY) missingEnvVars.push('APP_SECRET_ACCESS_KEY');
+if (!APP_S3_BUCKET) missingEnvVars.push('APP_S3_BUCKET');
 
 // Initialize AWS SDK clients only if we have the required credentials
 let s3Client: S3Client | null = null;
@@ -25,10 +25,10 @@ let textractClient: TextractClient | null = null;
 if (missingEnvVars.length === 0) {
   // Initialize AWS SDK clients
   const clientConfig = {
-    region: AWS_REGION,
+    region: APP_REGION,
     credentials: {
-      accessKeyId: AWS_ACCESS_KEY_ID!,
-      secretAccessKey: AWS_SECRET_ACCESS_KEY!
+      accessKeyId: APP_ACCESS_KEY_ID!,
+      secretAccessKey: APP_SECRET_ACCESS_KEY!
     }
   };
 
@@ -105,10 +105,10 @@ export async function POST(request: NextRequest) {
     try {
       // Upload to S3 for Textract processing
       const uploadKey = `uploads/${Date.now()}-${pageFile.name}`;
-      console.log(`Attempting to upload to S3 bucket: ${AWS_S3_BUCKET}`);
+      console.log(`Attempting to upload to S3 bucket: ${APP_S3_BUCKET}`);
       
       await s3Client.send(new PutObjectCommand({
-        Bucket: AWS_S3_BUCKET!,
+        Bucket: APP_S3_BUCKET!,
         Key: uploadKey,
         Body: buffer,
         ContentType: contentType
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       
       // Verify the upload worked
       const headResult = await s3Client.send(new HeadObjectCommand({
-        Bucket: AWS_S3_BUCKET!,
+        Bucket: APP_S3_BUCKET!,
         Key: uploadKey
       }));
       console.log('S3 head object result:', headResult);
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       const detectParams = {
         Document: {
           S3Object: {
-            Bucket: AWS_S3_BUCKET!,
+            Bucket: APP_S3_BUCKET!,
             Name: uploadKey
           }
         }

@@ -13,10 +13,18 @@ import pdfParse from "pdf-parse"
 
 const s3Client = new S3Client({
   region: process.env.APP_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
+  }
 })
 
 const textractClient = new TextractClient({
   region: process.env.APP_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
+  }
 })
 
 export async function POST(request: Request) {

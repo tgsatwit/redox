@@ -12,19 +12,19 @@ function getAwsCredentials() {
   // In development, use local credentials from environment variables
   return {
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+      accessKeyId: process.env.APP_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.APP_SECRET_ACCESS_KEY || ''
     },
-    region: process.env.AWS_REGION || 'us-east-1'
+    region: process.env.APP_REGION || 'us-east-1'
   };
 }
 
 export async function GET() {
   try {
     // Check for required environment variables
-    if (!process.env.AWS_REGION || !process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE) {
+    if (!process.env.APP_REGION || !process.env.DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE) {
       return NextResponse.json(
-        { error: "Missing required environment variables: AWS_REGION or DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE" },
+        { error: "Missing required environment variables: APP_REGION or DYNAMODB_CLASSIFICATION_FEEDBACK_TABLE" },
         { status: 500 }
       );
     }
@@ -32,7 +32,7 @@ export async function GET() {
     // Initialize DynamoDB client with credentials
     const dynamoDb = new DynamoDBClient({
       ...getAwsCredentials(),
-      region: process.env.AWS_REGION
+      region: process.env.APP_REGION
     });
     
     // Scan the table to get all feedback items
