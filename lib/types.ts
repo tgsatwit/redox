@@ -110,6 +110,7 @@ export interface AppConfig {
     redactFinancial: boolean;
   };
   retentionPolicies: RetentionPolicy[];
+  promptCategories: PromptCategory[];
 }
 
 // For the PDF redaction functionality
@@ -163,5 +164,26 @@ export interface TrainingDataset {
   modelStatus?: 'TRAINING' | 'TRAINED' | 'FAILED' | 'DELETING' | 'IN_ERROR'
   lastTrainedDate?: number
   version?: number
+}
+
+export type PromptRole = 'system' | 'user' | 'assistant';
+
+export interface Prompt {
+  id: string;
+  name: string;
+  description: string;
+  role: PromptRole;
+  content: string;
+  isActive: boolean;
+  category: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PromptCategory {
+  id: string;
+  name: string;
+  description: string;
+  prompts: Prompt[];
 }
 

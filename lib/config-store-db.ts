@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { AppConfig, DocumentTypeConfig, DataElementConfig, DocumentSubTypeConfig, TrainingDataset, TrainingExample } from './types'
+import { AppConfig, DocumentTypeConfig, DataElementConfig, DocumentSubTypeConfig, TrainingDataset, TrainingExample, PromptCategory, Prompt } from './types'
 import { createId } from '@paralleldrive/cuid2'
 
 // Initialize default data elements - using empty arrays
@@ -16,7 +16,8 @@ export const initialConfig: AppConfig = {
     redactPII: true,
     redactFinancial: true
   },
-  retentionPolicies: []
+  retentionPolicies: [],
+  promptCategories: []
 }
 
 // Define the state type
@@ -63,6 +64,15 @@ type ConfigState = {
   setDefaultModelForDocType: (documentTypeId: string, modelId: string) => Promise<void>
   
   resetToDefaults: () => Promise<void>
+
+  // Prompt management
+  addPromptCategory: (category: Omit<PromptCategory, 'id' | 'prompts'>) => Promise<PromptCategory>
+  updatePromptCategory: (id: string, updates: Partial<Omit<PromptCategory, 'id' | 'prompts'>>) => Promise<void>
+  deletePromptCategory: (id: string) => Promise<void>
+  
+  addPrompt: (categoryId: string, prompt: Omit<Prompt, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Prompt>
+  updatePrompt: (categoryId: string, promptId: string, updates: Partial<Omit<Prompt, 'id' | 'createdAt'>>) => Promise<void>
+  deletePrompt: (categoryId: string, promptId: string) => Promise<void>
 }
 
 // Create a store with API interaction instead of local persistence
@@ -127,7 +137,8 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
           redactPII: true,
           redactFinancial: true
         },
-        retentionPolicies: []
+        retentionPolicies: [],
+        promptCategories: []
       };
       
       // Load retention policies
@@ -969,5 +980,226 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
       });
       throw error;
     }
-  }
+  },
+
+  // Prompt management
+  addPromptCategory: async (category) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch('/api/config/prompt-categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(category)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      const newCategory = await response.json();
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          promptCategories: [...(state.config.promptCategories || []), newCategory]
+        },
+        isLoading: false
+      }));
+      
+      return newCategory;
+    } catch (error: any) {
+      console.error('Error adding prompt category:', error);
+      set({ 
+        error: error.message || 'Failed to add prompt category',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+
+  updatePromptCategory: async (id, updates) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch(`/api/config/prompt-categories/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          promptCategories: state.config.promptCategories?.map(cat => 
+            cat.id === id ? { ...cat, ...updates } : cat
+          ) || []
+        },
+        isLoading: false
+      }));
+    } catch (error: any) {
+      console.error(`Error updating prompt category ${id}:`, error);
+      set({ 
+        error: error.message || 'Failed to update prompt category',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+
+  deletePromptCategory: async (id) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch(`/api/config/prompt-categories/${id}`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          promptCategories: state.config.promptCategories?.filter(cat => cat.id !== id) || []
+        },
+        isLoading: false
+      }));
+    } catch (error: any) {
+      console.error(`Error deleting prompt category ${id}:`, error);
+      set({ 
+        error: error.message || 'Failed to delete prompt category',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+
+  addPrompt: async (categoryId, prompt) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch(`/api/config/prompt-categories/${categoryId}/prompts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(prompt)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      const newPrompt = await response.json();
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          promptCategories: state.config.promptCategories?.map(cat => 
+            cat.id === categoryId 
+              ? { ...cat, prompts: [...cat.prompts, newPrompt] }
+              : cat
+          ) || []
+        },
+        isLoading: false
+      }));
+      
+      return newPrompt;
+    } catch (error: any) {
+      console.error('Error adding prompt:', error);
+      set({ 
+        error: error.message || 'Failed to add prompt',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+
+  updatePrompt: async (categoryId, promptId, updates) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch(`/api/config/prompt-categories/${categoryId}/prompts/${promptId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          promptCategories: state.config.promptCategories?.map(cat => 
+            cat.id === categoryId 
+              ? {
+                  ...cat,
+                  prompts: cat.prompts.map(prompt =>
+                    prompt.id === promptId ? { ...prompt, ...updates } : prompt
+                  )
+                }
+              : cat
+          ) || []
+        },
+        isLoading: false
+      }));
+    } catch (error: any) {
+      console.error(`Error updating prompt ${promptId}:`, error);
+      set({ 
+        error: error.message || 'Failed to update prompt',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+
+  deletePrompt: async (categoryId, promptId) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch(`/api/config/prompt-categories/${categoryId}/prompts/${promptId}`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          promptCategories: state.config.promptCategories?.map(cat => 
+            cat.id === categoryId 
+              ? {
+                  ...cat,
+                  prompts: cat.prompts.filter(prompt => prompt.id !== promptId)
+                }
+              : cat
+          ) || []
+        },
+        isLoading: false
+      }));
+    } catch (error: any) {
+      console.error(`Error deleting prompt ${promptId}:`, error);
+      set({ 
+        error: error.message || 'Failed to delete prompt',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
 })) 

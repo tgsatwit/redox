@@ -18,7 +18,8 @@ const initialConfig: AppConfig = {
     redactPII: true,
     redactFinancial: true
   },
-  retentionPolicies: []
+  retentionPolicies: [],
+  promptCategories: []
 }
 
 // Define the state type

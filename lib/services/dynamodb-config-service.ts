@@ -17,7 +17,9 @@ import {
   DocumentSubTypeConfig,
   TrainingDataset,
   TrainingExample,
-  RetentionPolicy
+  RetentionPolicy,
+  PromptCategory,
+  Prompt
 } from '../types';
 import { initialConfig } from '../config-store-db';
 
@@ -29,6 +31,8 @@ const DATA_ELEMENT_TABLE = process.env.DYNAMODB_ELEMENT_TABLE || 'document-proce
 const TRAINING_DATASET_TABLE = process.env.DYNAMODB_DATASET_TABLE || 'document-processor-datasets';
 const TRAINING_EXAMPLE_TABLE = process.env.DYNAMODB_EXAMPLE_TABLE || 'document-processor-examples';
 const RETENTION_POLICY_TABLE = process.env.DYNAMODB_RETENTION_POLICY_TABLE || 'document-processor-retention-policies';
+const PROMPT_CATEGORIES_TABLE = process.env.DYNAMODB_PROMPT_CATEGORIES_TABLE || 'document-processor-prompt-categories';
+const PROMPTS_TABLE = process.env.DYNAMODB_PROMPTS_TABLE || 'document-processor-prompts';
 
 // Local storage keys
 const LS_CONFIG_KEY = 'document-processor-config';
@@ -38,6 +42,8 @@ const LS_DATA_ELEMENTS_KEY = 'document-processor-elements';
 const LS_TRAINING_DATASETS_KEY = 'document-processor-datasets';
 const LS_TRAINING_EXAMPLES_KEY = 'document-processor-examples';
 const LS_RETENTION_POLICIES_KEY = 'document-processor-retention-policies';
+const LS_PROMPT_CATEGORIES_KEY = 'document-processor-prompt-categories';
+const LS_PROMPTS_KEY = 'document-processor-prompts';
 
 // Server-side storage for fallback
 const serverStorage: Record<string, any> = {};
@@ -2108,6 +2114,375 @@ export class DynamoDBConfigService {
         const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
         const updatedPolicies = policies.filter(policy => policy.id !== id);
         saveToLocalStorage(LS_RETENTION_POLICIES_KEY, updatedPolicies);
+        return;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Get all prompt categories
+   */
+  async getAllPromptCategories(): Promise<PromptCategory[]> {
+    try {
+      if (this.useFallbackStorage) {
+        return getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+      }
+
+      const response = await docClient.send(
+        new ScanCommand({
+          TableName: PROMPT_CATEGORIES_TABLE,
+        })
+      );
+
+      return response.Items as PromptCategory[] || [];
+    } catch (error) {
+      console.error('Error fetching prompt categories:', error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for prompt categories due to permission issues');
+        this.useFallbackStorage = true;
+        return getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Add a new prompt category
+   */
+  async addPromptCategory(category: Omit<PromptCategory, 'id' | 'prompts'>): Promise<PromptCategory> {
+    try {
+      const newCategory: PromptCategory = {
+        ...category,
+        id: createId(),
+        prompts: []
+      };
+
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        categories.push(newCategory);
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, categories);
+        return newCategory;
+      }
+
+      await docClient.send(
+        new PutCommand({
+          TableName: PROMPT_CATEGORIES_TABLE,
+          Item: newCategory
+        })
+      );
+
+      return newCategory;
+    } catch (error) {
+      console.error('Error adding prompt category:', error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for adding prompt category due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const newCategory: PromptCategory = {
+          ...category,
+          id: createId(),
+          prompts: []
+        };
+        categories.push(newCategory);
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, categories);
+        return newCategory;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Update a prompt category
+   */
+  async updatePromptCategory(id: string, updates: Partial<Omit<PromptCategory, 'id' | 'prompts'>>): Promise<void> {
+    try {
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === id ? { ...category, ...updates } : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+
+      await docClient.send(
+        new UpdateCommand({
+          TableName: PROMPT_CATEGORIES_TABLE,
+          Key: { id },
+          UpdateExpression: 'SET #name = :name, #description = :description',
+          ExpressionAttributeNames: {
+            '#name': 'name',
+            '#description': 'description'
+          },
+          ExpressionAttributeValues: {
+            ':name': updates.name,
+            ':description': updates.description
+          }
+        })
+      );
+    } catch (error) {
+      console.error(`Error updating prompt category ${id}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for updating prompt category due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === id ? { ...category, ...updates } : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a prompt category
+   */
+  async deletePromptCategory(id: string): Promise<void> {
+    try {
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.filter(category => category.id !== id);
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+
+      await docClient.send(
+        new DeleteCommand({
+          TableName: PROMPT_CATEGORIES_TABLE,
+          Key: { id }
+        })
+      );
+    } catch (error) {
+      console.error(`Error deleting prompt category ${id}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for deleting prompt category due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.filter(category => category.id !== id);
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Get prompts for a category
+   */
+  async getPrompts(categoryId: string): Promise<Prompt[]> {
+    try {
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const category = categories.find(c => c.id === categoryId);
+        return category?.prompts || [];
+      }
+
+      const response = await docClient.send(
+        new QueryCommand({
+          TableName: PROMPTS_TABLE,
+          KeyConditionExpression: 'categoryId = :categoryId',
+          ExpressionAttributeValues: {
+            ':categoryId': categoryId
+          }
+        })
+      );
+
+      return response.Items as Prompt[] || [];
+    } catch (error) {
+      console.error(`Error fetching prompts for category ${categoryId}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for fetching prompts due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const category = categories.find(c => c.id === categoryId);
+        return category?.prompts || [];
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Add a new prompt to a category
+   */
+  async addPrompt(categoryId: string, prompt: Omit<Prompt, 'id' | 'createdAt' | 'updatedAt'>): Promise<Prompt> {
+    try {
+      const newPrompt: Prompt = {
+        ...prompt,
+        id: createId(),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === categoryId 
+            ? { ...category, prompts: [...category.prompts, newPrompt] }
+            : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return newPrompt;
+      }
+
+      await docClient.send(
+        new PutCommand({
+          TableName: PROMPTS_TABLE,
+          Item: {
+            ...newPrompt,
+            categoryId
+          }
+        })
+      );
+
+      return newPrompt;
+    } catch (error) {
+      console.error('Error adding prompt:', error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for adding prompt due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const newPromptForFallback = {
+          ...prompt,
+          id: createId(),
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+        const updatedCategories = categories.map(category => 
+          category.id === categoryId 
+            ? { ...category, prompts: [...category.prompts, newPromptForFallback] }
+            : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return newPromptForFallback;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Update a prompt
+   */
+  async updatePrompt(categoryId: string, promptId: string, updates: Partial<Omit<Prompt, 'id' | 'createdAt'>>): Promise<void> {
+    try {
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === categoryId 
+            ? {
+                ...category,
+                prompts: category.prompts.map(prompt =>
+                  prompt.id === promptId ? { ...prompt, ...updates, updatedAt: Date.now() } : prompt
+                )
+              }
+            : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+
+      await docClient.send(
+        new UpdateCommand({
+          TableName: PROMPTS_TABLE,
+          Key: { categoryId, id: promptId },
+          UpdateExpression: 'SET #name = :name, #description = :description, #role = :role, #content = :content, #updatedAt = :updatedAt',
+          ExpressionAttributeNames: {
+            '#name': 'name',
+            '#description': 'description',
+            '#role': 'role',
+            '#content': 'content',
+            '#updatedAt': 'updatedAt'
+          },
+          ExpressionAttributeValues: {
+            ':name': updates.name,
+            ':description': updates.description,
+            ':role': updates.role,
+            ':content': updates.content,
+            ':updatedAt': Date.now()
+          }
+        })
+      );
+    } catch (error) {
+      console.error(`Error updating prompt ${promptId}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for updating prompt due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === categoryId 
+            ? {
+                ...category,
+                prompts: category.prompts.map(prompt =>
+                  prompt.id === promptId ? { ...prompt, ...updates, updatedAt: Date.now() } : prompt
+                )
+              }
+            : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a prompt
+   */
+  async deletePrompt(categoryId: string, promptId: string): Promise<void> {
+    try {
+      if (this.useFallbackStorage) {
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === categoryId 
+            ? {
+                ...category,
+                prompts: category.prompts.filter(prompt => prompt.id !== promptId)
+              }
+            : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
+        return;
+      }
+
+      await docClient.send(
+        new DeleteCommand({
+          TableName: PROMPTS_TABLE,
+          Key: { categoryId, id: promptId }
+        })
+      );
+    } catch (error) {
+      console.error(`Error deleting prompt ${promptId}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for deleting prompt due to permission issues');
+        this.useFallbackStorage = true;
+        const categories = getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
+        const updatedCategories = categories.map(category => 
+          category.id === categoryId 
+            ? {
+                ...category,
+                prompts: category.prompts.filter(prompt => prompt.id !== promptId)
+              }
+            : category
+        );
+        saveToLocalStorage(LS_PROMPT_CATEGORIES_KEY, updatedCategories);
         return;
       }
       

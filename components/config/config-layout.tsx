@@ -2,8 +2,9 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DocumentConfigManager } from "./document-config-manager"
-import { RetentionPolicyManager } from "../retention-policy-manager"
+import { RetentionPolicyManager } from "./retention-policy-manager"
 import { WorkflowsManager } from "./workflows-manager"
+import { PromptsConfigManager } from "./prompts-config-manager"
 
 export function ConfigLayout() {
   return (
@@ -13,6 +14,7 @@ export function ConfigLayout() {
           <TabsTrigger value="document-config">Document Configuration</TabsTrigger>
           <TabsTrigger value="retention-policies">Retention Policies</TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
+          <TabsTrigger value="prompts">Prompts Configuration</TabsTrigger>
         </TabsList>
 
         <TabsContent value="document-config">
@@ -25,6 +27,10 @@ export function ConfigLayout() {
 
         <TabsContent value="workflows">
           <WorkflowsManager />
+        </TabsContent>
+
+        <TabsContent value="prompts">
+          <PromptsConfigManager />
         </TabsContent>
       </Tabs>
     </div>
