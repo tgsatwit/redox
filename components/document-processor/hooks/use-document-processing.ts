@@ -49,7 +49,11 @@ export function useDocumentProcessing() {
     processingOptions: {
       extractSpecificElements: false,
       redactElements: false,
-      createSummary: false
+      createSummary: false,
+      saveDocument: {
+        original: false,
+        redacted: false
+      }
     }
   });
 
@@ -89,7 +93,16 @@ export function useDocumentProcessing() {
         processingStatus: 'Starting page-by-page processing...',
         processingProgress: 0,
         processError: null,
-        showAwsHelper: false
+        showAwsHelper: false,
+        processingOptions: {
+          extractSpecificElements: false,
+          redactElements: false,
+          createSummary: false,
+          saveDocument: {
+            original: false,
+            redacted: false
+          }
+        }
       });
       
       // Process the PDF page by page
@@ -102,6 +115,14 @@ export function useDocumentProcessing() {
               processingStatus: status,
               processingProgress: Math.floor((progress / total) * 100)
             });
+          },
+          elementsToExtract: [],
+          extractSpecificElements: false,
+          redactElements: false,
+          createSummary: false,
+          saveDocument: {
+            original: false,
+            redacted: false
           }
         } as ProcessingOptions,
         false
@@ -372,7 +393,11 @@ export function useDocumentProcessing() {
       processingOptions: {
         extractSpecificElements: false,
         redactElements: false,
-        createSummary: false
+        createSummary: false,
+        saveDocument: {
+          original: false,
+          redacted: false
+        }
       }
     });
   }, [updateState]);

@@ -80,6 +80,7 @@ export interface DocumentSubTypeConfig {
   dataElements: DataElementConfig[]
   awsAnalysisType?: string
   isActive?: boolean
+  documentTypeId: string // Reference to parent document type
 }
 
 export interface DocumentTypeConfig {

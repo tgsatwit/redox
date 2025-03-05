@@ -60,6 +60,10 @@ export interface ProcessingOptionsState {
   extractSpecificElements: boolean;
   redactElements: boolean;
   createSummary: boolean;
+  saveDocument: {
+    original: boolean;
+    redacted: boolean;
+  };
 }
 
 export interface DocumentProcessorState {

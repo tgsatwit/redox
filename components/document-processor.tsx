@@ -677,10 +677,29 @@ export function DocumentProcessor() {
   };
   
   // Function to handle the selection of processing options
-  const handleProcessOptionChange = (option: keyof typeof processingOptions) => {
+  const handleProcessOptionChange = (option: keyof Omit<typeof processingOptions, 'saveDocument'>) => {
     setProcessingOptions(prev => ({
       ...prev,
       [option]: !prev[option]
+    }));
+  };
+
+  // Function to handle save document option changes
+  const handleSaveDocumentChange = (type: 'original' | 'redacted') => {
+    setProcessingOptions(prev => ({
+      ...prev,
+      saveDocument: {
+        ...prev.saveDocument,
+        [type]: !prev.saveDocument[type]
+      }
+    }));
+  };
+
+  // Function to handle retention policy changes
+  const handleRetentionPolicyChange = (type: 'original' | 'redacted', value: string) => {
+    setSelectedRetentionPolicies(prev => ({
+      ...prev,
+      [type]: value
     }));
   };
   
@@ -718,29 +737,6 @@ export function DocumentProcessor() {
       if (processingOptions.redactElements && extractedElements.length > 0) {
         console.log('Starting automatic redaction...');
         
-        // Auto-select PII elements for redaction if identifyPII is enabled
-        if (processingOptions.identifyPII) {
-          const piiElementIds = extractedElements
-            .filter(element => {
-              // Select elements that are configured for redaction or are PII
-              const isConfiguredForRedaction = (element as ExtendedRedactionElement).action === 'Redact' || 
-                                             (element as ExtendedRedactionElement).action === 'ExtractAndRedact';
-              
-              const isPII = (element as ExtendedRedactionElement).category === 'PersonalIdentifier' || 
-                           (element as ExtendedRedactionElement).label?.includes('NAME') || 
-                           (element as ExtendedRedactionElement).label?.includes('DOB') ||
-                           (element as ExtendedRedactionElement).label?.includes('BIRTH') ||
-                           (element as ExtendedRedactionElement).label?.includes('ADDRESS');
-              
-              return isConfiguredForRedaction || isPII;
-            })
-            .map(element => element.id);
-          
-          // Set the fields to redact
-          setFieldsToRedact(new Set(piiElementIds));
-          console.log(`Auto-selected ${piiElementIds.length} PII elements for redaction`);
-        }
-        
         // Apply redactions
         if (fieldsToRedact.size > 0) {
           console.log(`Applying redactions to ${fieldsToRedact.size} fields`);
@@ -756,9 +752,10 @@ export function DocumentProcessor() {
         await createDocumentSummary();
       }
       
-      if (processingOptions.saveDocument) {
-        console.log(`Saving document with ${selectedRetentionPolicy} retention...`);
-        await saveDocumentWithRetention(selectedRetentionPolicy);
+      // Handle document saving with retention policies
+      if (processingOptions.saveDocument.original || processingOptions.saveDocument.redacted) {
+        console.log('Saving document(s) with retention policies...');
+        await saveDocumentWithRetention();
       }
     } catch (error) {
       console.error('Error in processing workflow:', error);
@@ -2428,7 +2425,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
   };
   
   // Add the saveDocumentWithRetention function
-  const saveDocumentWithRetention = async (retentionPolicyId: string) => {
+  const saveDocumentWithRetention = async () => {
     if (!file) {
       toast({
         title: "Cannot save document",
@@ -2441,47 +2438,77 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
     try {
       setIsProcessing(true);
       
-      const retentionPolicy = config.retentionPolicies.find(p => p.id === retentionPolicyId);
-      if (!retentionPolicy) {
-        throw new Error("Selected retention policy not found");
+      // Save original document if selected
+      if (processingOptions.saveDocument.original && selectedRetentionPolicies.original) {
+        const originalRetentionPolicy = config.retentionPolicies.find(p => p.id === selectedRetentionPolicies.original);
+        if (!originalRetentionPolicy) {
+          throw new Error("Selected retention policy for original document not found");
+        }
+        
+        const originalMetadata = {
+          documentType: activeDocType?.name || 'Unknown',
+          documentSubType: selectedSubTypeId && activeDocType ? 
+            (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null,
+          retentionPolicy: {
+            id: originalRetentionPolicy.id,
+            name: originalRetentionPolicy.name,
+            duration: originalRetentionPolicy.duration
+          },
+          processedDate: new Date().toISOString(),
+          extractedElements: extractedElements,
+          isRedacted: false
+        };
+        
+        console.log(`Saving original document with retention policy: ${originalRetentionPolicy.name}`);
+        console.log("Original document metadata:", originalMetadata);
+        
+        // In a real implementation, you would upload the file and metadata:
+        // const formData = new FormData();
+        // formData.append('file', file);
+        // formData.append('metadata', JSON.stringify(originalMetadata));
+        // const response = await fetch('/api/save-document', {
+        //   method: 'POST',
+        //   body: formData
+        // });
       }
       
-      // Prepare document metadata
-      const documentMetadata = {
-        documentType: activeDocType?.name || 'Unknown',
-        documentSubType: selectedSubTypeId && activeDocType ? 
-          (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null,
-        retentionPolicy: {
-          id: retentionPolicy.id,
-          name: retentionPolicy.name,
-          duration: retentionPolicy.duration
-        },
-        processedDate: new Date().toISOString(),
-        extractedElements: extractedElements,
-        // Include any other metadata needed
-      };
-      
-      // We would typically make an API call here to save the document
-      // For now, we'll simulate it with a timeout
-      
-      // In a real implementation, you would upload the file and metadata:
-      // const formData = new FormData();
-      // formData.append('file', file);
-      // formData.append('metadata', JSON.stringify(documentMetadata));
-      // const response = await fetch('/api/save-document', {
-      //   method: 'POST',
-      //   body: formData
-      // });
-      
-      console.log(`Saving document with retention policy: ${retentionPolicy.name}`);
-      console.log("Document metadata:", documentMetadata);
-      
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Save redacted document if selected and available
+      if (processingOptions.saveDocument.redacted && selectedRetentionPolicies.redacted && redactedImageUrl) {
+        const redactedRetentionPolicy = config.retentionPolicies.find(p => p.id === selectedRetentionPolicies.redacted);
+        if (!redactedRetentionPolicy) {
+          throw new Error("Selected retention policy for redacted document not found");
+        }
+        
+        const redactedMetadata = {
+          documentType: activeDocType?.name || 'Unknown',
+          documentSubType: selectedSubTypeId && activeDocType ? 
+            (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null,
+          retentionPolicy: {
+            id: redactedRetentionPolicy.id,
+            name: redactedRetentionPolicy.name,
+            duration: redactedRetentionPolicy.duration
+          },
+          processedDate: new Date().toISOString(),
+          extractedElements: extractedElements,
+          isRedacted: true
+        };
+        
+        console.log(`Saving redacted document with retention policy: ${redactedRetentionPolicy.name}`);
+        console.log("Redacted document metadata:", redactedMetadata);
+        
+        // In a real implementation, you would upload the file and metadata:
+        // const formData = new FormData();
+        // formData.append('file', redactedFile);
+        // formData.append('metadata', JSON.stringify(redactedMetadata));
+        // const response = await fetch('/api/save-document', {
+        //   method: 'POST',
+        //   body: formData
+        // });
+      }
       
       toast({
         title: "Document saved",
-        description: `Document has been saved with ${retentionPolicy.name} retention policy`,
+        description: "Document(s) have been saved with selected retention policies",
         variant: "default"
       });
       
@@ -2500,15 +2527,33 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
   // Add after other state variables declarations, around line 350
   const [allElements, setAllElements] = useState<ExtendedRedactionElement[]>([])
   const [activeDocumentSubType, setActiveDocumentSubType] = useState<DocumentSubTypeConfig | null>(null)
-  const [processingOptions, setProcessingOptions] = useState({
+  const [processingOptions, setProcessingOptions] = useState<{
+    extractSpecificElements: boolean;
+    extractFullText: boolean;
+    redactElements: boolean;
+    createSummary: boolean;
+    saveDocument: {
+      original: boolean;
+      redacted: boolean;
+    };
+  }>({
     extractSpecificElements: true,
     extractFullText: false,
     redactElements: false,
-    identifyPII: false,
     createSummary: false,
-    saveDocument: false
-  })
-  const [selectedRetentionPolicy, setSelectedRetentionPolicy] = useState<string>("")
+    saveDocument: {
+      original: false,
+      redacted: false
+    }
+  });
+
+  const [selectedRetentionPolicies, setSelectedRetentionPolicies] = useState<{
+    original: string;
+    redacted: string;
+  }>({
+    original: "",
+    redacted: ""
+  });
 
   // New function to match elements using our GPT API
   const matchElementsWithGPT = async (
@@ -2556,7 +2601,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
 
   return (
     <>
-      {/* Main heading and workflow indicators moved outside of cards */}
+      {/* Main heading and workflow indicators */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-2xl font-bold">Process Documents</h2>
@@ -2574,7 +2619,6 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
         </div>
       </div>
 
-      {/* Update grid to make columns equal width */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left Column - Workflow Steps */}
         <div className="space-y-6">
@@ -2933,51 +2977,66 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
 
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label htmlFor="identify-pii">Identify PII Data</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Automatically identify personally identifiable information
-                        </p>
-                      </div>
-                      <Switch 
-                        checked={processingOptions.identifyPII}
-                        onCheckedChange={() => handleProcessOptionChange('identifyPII')}
-                        disabled={!processingOptions.extractSpecificElements && !processingOptions.redactElements}
-                      />
-                    </div>
-                    
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="create-summary">Create Document Summary</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Generate a summary of the document's contents
-                        </p>
+                        <Label htmlFor="create-summary">Create Summary</Label>
+                        <p className="text-xs text-muted-foreground">Generate a document summary</p>
                       </div>
                       <Switch 
                         checked={processingOptions.createSummary}
                         onCheckedChange={() => handleProcessOptionChange('createSummary')}
                       />
                     </div>
+                  </div>
+                  
+                  <div className="space-y-4 border-t pt-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="save-original">Save Original Document</Label>
+                        <p className="text-xs text-muted-foreground">Save the original document with retention policy</p>
+                      </div>
+                      <Switch 
+                        checked={processingOptions.saveDocument.original}
+                        onCheckedChange={() => handleSaveDocumentChange('original')}
+                      />
+                    </div>
+
+                    {processingOptions.saveDocument.original && (
+                      <div className="mt-2 pl-2 border-l-2 border-muted">
+                        <p className="text-sm font-medium mb-1">Original Document Retention Policy:</p>
+                        <Select
+                          value={selectedRetentionPolicies.original}
+                          onValueChange={(value) => handleRetentionPolicyChange('original', value)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select Retention Policy" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {config.retentionPolicies.map((policy) => (
+                              <SelectItem key={policy.id} value={policy.id}>
+                                {policy.name} ({policy.duration} days)
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label htmlFor="save-document">Save Document</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Save document to the system with retention policy
-                        </p>
+                        <Label htmlFor="save-redacted">Save Redacted Document</Label>
+                        <p className="text-xs text-muted-foreground">Save the redacted document with retention policy</p>
                       </div>
                       <Switch 
-                        checked={processingOptions.saveDocument}
-                        onCheckedChange={() => handleProcessOptionChange('saveDocument')}
+                        checked={processingOptions.saveDocument.redacted}
+                        onCheckedChange={() => handleSaveDocumentChange('redacted')}
                       />
                     </div>
-                    
-                    {/* Show retention options when Save Document is enabled */}
-                    {processingOptions.saveDocument && (
+
+                    {processingOptions.saveDocument.redacted && (
                       <div className="mt-2 pl-2 border-l-2 border-muted">
-                        <p className="text-sm font-medium mb-1">Retention Policy:</p>
+                        <p className="text-sm font-medium mb-1">Redacted Document Retention Policy:</p>
                         <Select
-                          value={selectedRetentionPolicy}
-                          onValueChange={setSelectedRetentionPolicy}
+                          value={selectedRetentionPolicies.redacted}
+                          onValueChange={(value) => handleRetentionPolicyChange('redacted', value)}
                         >
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select Retention Policy" />
@@ -3019,7 +3078,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
             </div>
           </Card>
           
-          {/* Data Elements Card - Shows extracted data elements - ADD CHECKBOXES HERE */}
+          {/* Data Elements Card - Shows extracted data elements */}
           {file && extractedElements.length > 0 && (
             <Card className="p-4">
               <div className="flex items-center justify-between mb-4">
@@ -3118,8 +3177,8 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
               </div>
             </Card>
           )}
-          
-          {/* Error messages moved outside the card but still in the left column */}
+
+          {/* Error messages */}
           {uploadError && (
             <div className="p-3 bg-destructive/10 text-destructive rounded-md">
               {uploadError}
@@ -3292,12 +3351,12 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
             )}
           </Card>
         </div>
-        
-        <Dialog open={verificationOpen} onOpenChange={setVerificationOpen}>
-          {/* ... existing dialog content ... */}
-        </Dialog>
       </div>
+
+      <Dialog open={verificationOpen} onOpenChange={setVerificationOpen}>
+        {/* ... existing dialog content ... */}
+      </Dialog>
     </>
-  )
+  );
 }
 

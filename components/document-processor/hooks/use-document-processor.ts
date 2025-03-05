@@ -50,7 +50,11 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
     processingOptions: {
       extractSpecificElements: false,
       redactElements: false,
-      createSummary: false
+      createSummary: false,
+      saveDocument: {
+        original: false,
+        redacted: false
+      }
     }
   });
 
@@ -316,7 +320,11 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
       processingOptions: {
         extractSpecificElements: false,
         redactElements: false,
-        createSummary: false
+        createSummary: false,
+        saveDocument: {
+          original: false,
+          redacted: false
+        }
       }
     });
   }, [updateState]);

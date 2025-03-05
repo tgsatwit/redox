@@ -67,7 +67,8 @@ export function SubTypeManager({
     description: "",
     dataElements: [],
     awsAnalysisType: "TEXTRACT_ANALYZE_DOCUMENT" as const,
-    isActive: true
+    isActive: true,
+    documentTypeId: documentType.id
   })
   
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -84,7 +85,7 @@ export function SubTypeManager({
       
       await addSubType(documentType.id, {
         ...newSubType,
-        id: subTypeId
+        documentTypeId: documentType.id
       })
       
       setNewSubTypeOpen(false)
@@ -93,7 +94,8 @@ export function SubTypeManager({
         description: "",
         dataElements: [],
         awsAnalysisType: "TEXTRACT_ANALYZE_DOCUMENT",
-        isActive: true
+        isActive: true,
+        documentTypeId: documentType.id
       })
       
       // Automatically select the new subtype
