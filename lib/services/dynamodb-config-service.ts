@@ -404,6 +404,8 @@ export class DynamoDBConfigService {
           PutRequest: {
             Item: {
               ...element,
+              // Ensure aliases are included if they exist
+              ...(element.aliases && { aliases: element.aliases }),
               documentTypeId: newDocType.id
             }
           }
@@ -424,6 +426,64 @@ export class DynamoDBConfigService {
           } catch (batchError) {
             console.error(`Error saving batch of data elements for document type ${newDocType.id}:`, batchError);
             // We'll continue with the next batch even if this one fails
+          }
+        }
+      }
+
+      // If there are subtypes, save them separately
+      if (newDocType.subTypes && newDocType.subTypes.length > 0) {
+        console.log(`Saving ${newDocType.subTypes.length} subtypes for document type ${newDocType.id}`);
+        
+        // Process each subtype
+        for (const subType of newDocType.subTypes) {
+          // Make sure the subtype has a valid ID
+          const subTypeWithId = {
+            ...subType,
+            id: subType.id || createId(),
+            documentTypeId: newDocType.id
+          };
+          
+          // Save the subtype
+          await docClient.send(
+            new PutCommand({
+              TableName: SUB_TYPE_TABLE,
+              Item: subTypeWithId
+            })
+          );
+          
+          // If the subtype has data elements, save them too
+          if (subTypeWithId.dataElements && subTypeWithId.dataElements.length > 0) {
+            console.log(`Saving ${subTypeWithId.dataElements.length} data elements for subtype ${subTypeWithId.id}`);
+            
+            const subTypeBatchWriteItems = subTypeWithId.dataElements.map(element => ({
+              PutRequest: {
+                Item: {
+                  ...element,
+                  // Ensure aliases are included if they exist
+                  ...(element.aliases && { aliases: element.aliases }),
+                  documentTypeId: newDocType.id,
+                  subTypeId: subTypeWithId.id
+                }
+              }
+            }));
+            
+            // Process batch writes in chunks of 25 (DynamoDB limit)
+            for (let i = 0; i < subTypeBatchWriteItems.length; i += 25) {
+              const batch = subTypeBatchWriteItems.slice(i, i + 25);
+              
+              try {
+                await docClient.send(
+                  new BatchWriteCommand({
+                    RequestItems: {
+                      [DATA_ELEMENT_TABLE]: batch
+                    }
+                  })
+                );
+              } catch (batchError) {
+                console.error(`Error saving batch of data elements for subtype ${subTypeWithId.id}:`, batchError);
+                // We'll continue with the next batch even if this one fails
+              }
+            }
           }
         }
       }
@@ -1207,6 +1267,8 @@ export class DynamoDBConfigService {
       ...dataElement,
       id: createId(),
       documentTypeId,
+      // Ensure aliases are included if they exist
+      ...(dataElement.aliases && { aliases: dataElement.aliases }),
       ...(subTypeId && { subTypeId })
     };
 
@@ -1329,7 +1391,12 @@ export class DynamoDBConfigService {
                 return {
                   ...subType,
                   dataElements: (subType.dataElements || []).map(element => 
-                    element.id === dataElementId ? { ...element, ...updates } : element
+                    element.id === dataElementId ? { 
+                      ...element, 
+                      ...updates,
+                      // Ensure aliases are properly updated
+                      ...(updates.aliases && { aliases: updates.aliases })
+                    } : element
                   )
                 };
               }) || []
@@ -1340,7 +1407,12 @@ export class DynamoDBConfigService {
           return {
             ...docType,
             dataElements: docType.dataElements.map(element => 
-              element.id === dataElementId ? { ...element, ...updates } : element
+              element.id === dataElementId ? { 
+                ...element, 
+                ...updates,
+                // Ensure aliases are properly updated
+                ...(updates.aliases && { aliases: updates.aliases })
+              } : element
             )
           };
         });
@@ -1369,6 +1441,16 @@ export class DynamoDBConfigService {
 
       if (updateExpressions.length === 0) {
         return; // Nothing to update
+      }
+
+      // Ensure aliases are handled properly
+      if (updates.aliases !== undefined) {
+        // If aliases is not in the update expressions (possibly because it was an empty array), add it
+        if (!expressionAttributeNames['#aliases']) {
+          updateExpressions.push('#aliases = :aliases');
+          expressionAttributeNames['#aliases'] = 'aliases';
+          expressionAttributeValues[':aliases'] = updates.aliases || [];
+        }
       }
 
       await docClient.send(
@@ -1402,7 +1484,12 @@ export class DynamoDBConfigService {
                 return {
                   ...subType,
                   dataElements: (subType.dataElements || []).map(element => 
-                    element.id === dataElementId ? { ...element, ...updates } : element
+                    element.id === dataElementId ? { 
+                      ...element, 
+                      ...updates,
+                      // Ensure aliases are properly updated
+                      ...(updates.aliases && { aliases: updates.aliases })
+                    } : element
                   )
                 };
               }) || []
@@ -1413,7 +1500,12 @@ export class DynamoDBConfigService {
           return {
             ...docType,
             dataElements: docType.dataElements.map(element => 
-              element.id === dataElementId ? { ...element, ...updates } : element
+              element.id === dataElementId ? { 
+                ...element, 
+                ...updates,
+                // Ensure aliases are properly updated
+                ...(updates.aliases && { aliases: updates.aliases })
+              } : element
             )
           };
         });

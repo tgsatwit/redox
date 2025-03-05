@@ -69,6 +69,7 @@ export interface DataElementConfig {
   isDefault?: boolean // If this is a default field for the document type
   documentTypeId?: string // Reference to parent document type
   subTypeId?: string // Reference to sub-type if this element belongs to a sub-type
+  aliases?: string[] // Alternative variable names that can be used in incoming payloads
 }
 
 // New interface for document sub-types
