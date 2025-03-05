@@ -756,8 +756,8 @@ export function DocumentProcessor() {
       }
       
       if (processingOptions.saveDocument) {
-        console.log(`Saving document with ${retentionPeriod} retention...`);
-        await saveDocumentWithRetention(retentionPeriod);
+        console.log(`Saving document with ${selectedRetentionPolicy} retention...`);
+        await saveDocumentWithRetention(selectedRetentionPolicy);
       }
     } catch (error) {
       console.error('Error in processing workflow:', error);
@@ -2388,19 +2388,19 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
         });
       
       const summary = `
-Document Summary
-----------------
-Document Type: ${activeDocType.name}
-${selectedSubTypeId && activeDocType.subTypes 
-  ? `Document Sub-Type: ${activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.name || ''}` 
-  : ''}
-Date Processed: ${new Date().toISOString().split('T')[0]}
+        Document Summary
+        ----------------
+        Document Type: ${activeDocType.name}
+        ${selectedSubTypeId && activeDocType.subTypes 
+          ? `Document Sub-Type: ${activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.name || ''}` 
+          : ''}
+        Date Processed: ${new Date().toISOString().split('T')[0]}
 
-Extracted Information:
-${formattedElements.join('\n')}
+        Extracted Information:
+        ${formattedElements.join('\n')}
 
-${extractedText ? `Text Extract (first 200 chars): 
-${extractedText.substring(0, 200)}...` : ''}
+        ${extractedText ? `Text Extract (first 200 chars): 
+        ${extractedText.substring(0, 200)}...` : ''}
       `.trim();
       
       console.log("Generated summary:", summary);
@@ -2427,7 +2427,7 @@ ${extractedText.substring(0, 200)}...` : ''}
   };
   
   // Add the saveDocumentWithRetention function
-  const saveDocumentWithRetention = async (retention: string) => {
+  const saveDocumentWithRetention = async (retentionPolicyId: string) => {
     if (!file) {
       toast({
         title: "Cannot save document",
@@ -2440,12 +2440,21 @@ ${extractedText.substring(0, 200)}...` : ''}
     try {
       setIsProcessing(true);
       
+      const retentionPolicy = config.retentionPolicies.find(p => p.id === retentionPolicyId);
+      if (!retentionPolicy) {
+        throw new Error("Selected retention policy not found");
+      }
+      
       // Prepare document metadata
       const documentMetadata = {
         documentType: activeDocType?.name || 'Unknown',
         documentSubType: selectedSubTypeId && activeDocType ? 
           (activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.name || null) : null,
-        retention: retention,
+        retentionPolicy: {
+          id: retentionPolicy.id,
+          name: retentionPolicy.name,
+          duration: retentionPolicy.duration
+        },
         processedDate: new Date().toISOString(),
         extractedElements: extractedElements,
         // Include any other metadata needed
@@ -2463,7 +2472,7 @@ ${extractedText.substring(0, 200)}...` : ''}
       //   body: formData
       // });
       
-      console.log(`Saving document with retention: ${retention}`);
+      console.log(`Saving document with retention policy: ${retentionPolicy.name}`);
       console.log("Document metadata:", documentMetadata);
       
       // Simulate API delay
@@ -2471,7 +2480,7 @@ ${extractedText.substring(0, 200)}...` : ''}
       
       toast({
         title: "Document saved",
-        description: `Document has been saved with ${retention} retention policy`,
+        description: `Document has been saved with ${retentionPolicy.name} retention policy`,
         variant: "default"
       });
       
@@ -2498,7 +2507,7 @@ ${extractedText.substring(0, 200)}...` : ''}
     createSummary: false,
     saveDocument: false
   })
-  const [retentionPeriod, setRetentionPeriod] = useState<string>("2years")
+  const [selectedRetentionPolicy, setSelectedRetentionPolicy] = useState<string>("")
 
   // New function to match elements using our GPT API
   const matchElementsWithGPT = async (
@@ -2949,19 +2958,20 @@ ${extractedText.substring(0, 200)}...` : ''}
                     {/* Show retention options when Save Document is enabled */}
                     {processingOptions.saveDocument && (
                       <div className="mt-2 pl-2 border-l-2 border-muted">
-                        <p className="text-sm font-medium mb-1">Retention Period:</p>
+                        <p className="text-sm font-medium mb-1">Retention Policy:</p>
                         <Select
-                          value={retentionPeriod}
-                          onValueChange={setRetentionPeriod}
+                          value={selectedRetentionPolicy}
+                          onValueChange={setSelectedRetentionPolicy}
                         >
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select Retention Period" />
+                            <SelectValue placeholder="Select Retention Policy" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="2years">2 Years</SelectItem>
-                            <SelectItem value="5years">5 Years</SelectItem>
-                            <SelectItem value="7years">7 Years</SelectItem>
-                            <SelectItem value="10years">10 Years</SelectItem>
+                            {config.retentionPolicies.map((policy) => (
+                              <SelectItem key={policy.id} value={policy.id}>
+                                {policy.name} ({policy.duration} days)
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>

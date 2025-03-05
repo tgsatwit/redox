@@ -1,6 +1,6 @@
 'use client'
 
-import { DocumentConfigManager } from "@/components/document-config"
+import { ConfigLayout } from "@/components/config"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, Plus } from "lucide-react"
 import Link from "next/link"
@@ -38,20 +38,12 @@ export default function ConfigPage() {
     <div className="container py-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Document Configuration</h1>
+          <h1 className="text-2xl font-bold tracking-tight">System Configuration</h1>
           <p className="text-muted-foreground">
-            Configure what data elements to identify and extract, or identify and redact from each document type.
+            Configure document types, retention policies, and automated workflows.
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          <Button 
-            variant="outline" 
-            onClick={() => document.getElementById('new-doc-type-button')?.click()}
-            disabled={isLoading}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            New Document Type
-          </Button>
           <Button 
             variant="secondary" 
             onClick={() => setResetConfirmOpen(true)}
@@ -67,7 +59,7 @@ export default function ConfigPage() {
           </Link>
         </div>
       </div>
-      <DocumentConfigManager />
+      <ConfigLayout />
 
       {/* Reset Confirmation Dialog */}
       <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>

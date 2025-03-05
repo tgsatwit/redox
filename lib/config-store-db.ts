@@ -15,7 +15,8 @@ export const initialConfig: AppConfig = {
   defaultRedactionSettings: {
     redactPII: true,
     redactFinancial: true
-  }
+  },
+  retentionPolicies: []
 }
 
 // Define the state type
@@ -125,8 +126,21 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
         defaultRedactionSettings: {
           redactPII: true,
           redactFinancial: true
-        }
+        },
+        retentionPolicies: []
       };
+      
+      // Load retention policies
+      try {
+        const retentionPoliciesResponse = await fetch('/api/retention-policies');
+        if (retentionPoliciesResponse.ok) {
+          appConfig.retentionPolicies = await retentionPoliciesResponse.json();
+        } else {
+          console.warn('Failed to load retention policies');
+        }
+      } catch (error) {
+        console.error('Error loading retention policies:', error);
+      }
       
       set({
         config: appConfig,

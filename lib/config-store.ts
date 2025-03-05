@@ -7,7 +7,8 @@ import type {
   AppConfig,
   TrainingDataset,
   TrainingExample,
-  DocumentSubTypeConfig
+  DocumentSubTypeConfig,
+  RetentionPolicy
 } from './types'
 
 // Initialize app configuration with empty arrays instead of mock data
@@ -16,7 +17,8 @@ const initialConfig: AppConfig = {
   defaultRedactionSettings: {
     redactPII: true,
     redactFinancial: true
-  }
+  },
+  retentionPolicies: []
 }
 
 // Define the state type
@@ -50,6 +52,11 @@ type ConfigState = {
   updateModelStatus: (documentTypeId: string, datasetId: string, modelStatus: TrainingDataset['modelStatus'], modelId?: string, modelArn?: string) => void
   setDefaultModelForDocType: (documentTypeId: string, modelId: string) => void
   
+  // Retention policy management
+  addRetentionPolicy: (policy: Omit<RetentionPolicy, 'id' | 'createdAt' | 'updatedAt'>) => void
+  updateRetentionPolicy: (id: string, updates: Partial<Omit<RetentionPolicy, 'id' | 'createdAt'>>) => void
+  deleteRetentionPolicy: (id: string) => void
+  
   resetToDefaults: () => void
 }
 
@@ -61,7 +68,7 @@ type ConfigPersist = {
 // Create a store with persistence
 export const useConfigStore = create<ConfigState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       config: initialConfig,
       activeDocumentTypeId: initialConfig.documentTypes[0]?.id || null,
       
@@ -392,6 +399,40 @@ export const useConfigStore = create<ConfigState>()(
           },
         };
       }),
+      
+      // Retention policy management
+      addRetentionPolicy: (policy) => set((state) => ({
+        config: {
+          ...state.config,
+          retentionPolicies: [
+            ...(state.config.retentionPolicies || []),
+            {
+              ...policy,
+              id: uuidv4(),
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            }
+          ]
+        }
+      })),
+
+      updateRetentionPolicy: (id, updates) => set((state) => ({
+        config: {
+          ...state.config,
+          retentionPolicies: (state.config.retentionPolicies || []).map(policy =>
+            policy.id === id
+              ? { ...policy, ...updates, updatedAt: Date.now() }
+              : policy
+          )
+        }
+      })),
+
+      deleteRetentionPolicy: (id) => set((state) => ({
+        config: {
+          ...state.config,
+          retentionPolicies: (state.config.retentionPolicies || []).filter(policy => policy.id !== id)
+        }
+      })),
       
       resetToDefaults: () => set({ config: initialConfig })
     }),

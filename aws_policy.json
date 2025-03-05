@@ -80,7 +80,8 @@
 				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements",
 				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets",
 				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback"
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback",
+				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-retention-policies"
 			]
 		},
 		{
@@ -100,6 +101,14 @@
 				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/documentId-index",
 				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/timestamp-index"
 			]
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"ssm:GetParameter",
+				"ssm:GetParametersByPath"
+			],
+			"Resource": "arn:aws:ssm:ap-southeast-2:205930635809:parameter/amplify/d3uu2r0jj682y6/main/*"
 		}
 	]
 }

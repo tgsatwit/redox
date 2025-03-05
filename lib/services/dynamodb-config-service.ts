@@ -16,7 +16,8 @@ import {
   DataElementConfig, 
   DocumentSubTypeConfig,
   TrainingDataset,
-  TrainingExample
+  TrainingExample,
+  RetentionPolicy
 } from '../types';
 import { initialConfig } from '../config-store-db';
 
@@ -27,6 +28,7 @@ const SUB_TYPE_TABLE = process.env.DYNAMODB_SUBTYPE_TABLE || 'document-processor
 const DATA_ELEMENT_TABLE = process.env.DYNAMODB_ELEMENT_TABLE || 'document-processor-elements';
 const TRAINING_DATASET_TABLE = process.env.DYNAMODB_DATASET_TABLE || 'document-processor-datasets';
 const TRAINING_EXAMPLE_TABLE = process.env.DYNAMODB_EXAMPLE_TABLE || 'document-processor-examples';
+const RETENTION_POLICY_TABLE = process.env.DYNAMODB_RETENTION_POLICY_TABLE || 'document-processor-retention-policies';
 
 // Local storage keys
 const LS_CONFIG_KEY = 'document-processor-config';
@@ -35,6 +37,7 @@ const LS_SUB_TYPES_KEY = 'document-processor-subtypes';
 const LS_DATA_ELEMENTS_KEY = 'document-processor-elements';
 const LS_TRAINING_DATASETS_KEY = 'document-processor-datasets';
 const LS_TRAINING_EXAMPLES_KEY = 'document-processor-examples';
+const LS_RETENTION_POLICIES_KEY = 'document-processor-retention-policies';
 
 // Server-side storage for fallback
 const serverStorage: Record<string, any> = {};
@@ -1941,6 +1944,173 @@ export class DynamoDBConfigService {
       );
     } catch (error) {
       console.error(`Error deleting training example ${exampleId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all retention policies
+   */
+  async getAllRetentionPolicies(): Promise<RetentionPolicy[]> {
+    try {
+      if (this.useFallbackStorage) {
+        return getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+      }
+
+      const response = await docClient.send(
+        new ScanCommand({
+          TableName: RETENTION_POLICY_TABLE,
+        })
+      );
+
+      return response.Items as RetentionPolicy[] || [];
+    } catch (error) {
+      console.error('Error fetching retention policies:', error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for retention policies due to permission issues');
+        this.useFallbackStorage = true;
+        return getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Add a new retention policy
+   */
+  async addRetentionPolicy(policy: Omit<RetentionPolicy, 'id' | 'createdAt' | 'updatedAt'>): Promise<RetentionPolicy> {
+    try {
+      const newPolicy: RetentionPolicy = {
+        ...policy,
+        id: createId(),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      if (this.useFallbackStorage) {
+        const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+        policies.push(newPolicy);
+        saveToLocalStorage(LS_RETENTION_POLICIES_KEY, policies);
+        return newPolicy;
+      }
+
+      await docClient.send(
+        new PutCommand({
+          TableName: RETENTION_POLICY_TABLE,
+          Item: newPolicy
+        })
+      );
+
+      return newPolicy;
+    } catch (error) {
+      console.error('Error adding retention policy:', error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for adding retention policy due to permission issues');
+        this.useFallbackStorage = true;
+        const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+        const newPolicy: RetentionPolicy = {
+          ...policy,
+          id: createId(),
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+        policies.push(newPolicy);
+        saveToLocalStorage(LS_RETENTION_POLICIES_KEY, policies);
+        return newPolicy;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Update a retention policy
+   */
+  async updateRetentionPolicy(id: string, updates: Partial<Omit<RetentionPolicy, 'id' | 'createdAt'>>): Promise<void> {
+    try {
+      if (this.useFallbackStorage) {
+        const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+        const updatedPolicies = policies.map(policy => 
+          policy.id === id 
+            ? { ...policy, ...updates, updatedAt: Date.now() }
+            : policy
+        );
+        saveToLocalStorage(LS_RETENTION_POLICIES_KEY, updatedPolicies);
+        return;
+      }
+
+      await docClient.send(
+        new UpdateCommand({
+          TableName: RETENTION_POLICY_TABLE,
+          Key: { id },
+          UpdateExpression: 'SET #name = :name, #description = :description, #duration = :duration, #updatedAt = :updatedAt',
+          ExpressionAttributeNames: {
+            '#name': 'name',
+            '#description': 'description',
+            '#duration': 'duration',
+            '#updatedAt': 'updatedAt'
+          },
+          ExpressionAttributeValues: {
+            ':name': updates.name,
+            ':description': updates.description,
+            ':duration': updates.duration,
+            ':updatedAt': Date.now()
+          }
+        })
+      );
+    } catch (error) {
+      console.error(`Error updating retention policy ${id}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for updating retention policy due to permission issues');
+        this.useFallbackStorage = true;
+        const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+        const updatedPolicies = policies.map(policy => 
+          policy.id === id 
+            ? { ...policy, ...updates, updatedAt: Date.now() }
+            : policy
+        );
+        saveToLocalStorage(LS_RETENTION_POLICIES_KEY, updatedPolicies);
+        return;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a retention policy
+   */
+  async deleteRetentionPolicy(id: string): Promise<void> {
+    try {
+      if (this.useFallbackStorage) {
+        const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+        const updatedPolicies = policies.filter(policy => policy.id !== id);
+        saveToLocalStorage(LS_RETENTION_POLICIES_KEY, updatedPolicies);
+        return;
+      }
+
+      await docClient.send(
+        new DeleteCommand({
+          TableName: RETENTION_POLICY_TABLE,
+          Key: { id }
+        })
+      );
+    } catch (error) {
+      console.error(`Error deleting retention policy ${id}:`, error);
+      
+      if (isPermissionError(error)) {
+        console.log('Using local storage fallback for deleting retention policy due to permission issues');
+        this.useFallbackStorage = true;
+        const policies = getFromLocalStorage<RetentionPolicy[]>(LS_RETENTION_POLICIES_KEY, []);
+        const updatedPolicies = policies.filter(policy => policy.id !== id);
+        saveToLocalStorage(LS_RETENTION_POLICIES_KEY, updatedPolicies);
+        return;
+      }
+      
       throw error;
     }
   }

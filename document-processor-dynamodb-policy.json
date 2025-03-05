@@ -29,7 +29,8 @@
         "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements",
         "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets",
         "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples",
-        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback"
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback",
+        "arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-retention-policies"
       ]
     },
     {

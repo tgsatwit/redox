@@ -6,4 +6,5 @@ export { DataElementManager } from "./data-element-manager";
 export { SyncConfigurationPanel } from "./sync-configuration-panel";
 export { DefaultElementsPanel } from "./default-elements-panel";
 export { ConfigurationSyncPanel } from "./configuration-sync-panel";
-export { FeedbackTrainingPanel } from "./feedback-training-panel"; 
+export { FeedbackTrainingPanel } from "./feedback-training-panel";
+export { ConfigLayout } from "./config-layout"; 

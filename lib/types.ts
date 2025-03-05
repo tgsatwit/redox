@@ -94,12 +94,22 @@ export interface DocumentTypeConfig {
   defaultModelId?: string
 }
 
+export interface RetentionPolicy {
+  id: string;
+  name: string;
+  description: string;
+  duration: number; // Duration in days
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AppConfig {
-  documentTypes: DocumentTypeConfig[]
+  documentTypes: DocumentTypeConfig[];
   defaultRedactionSettings: {
-    redactPII: boolean
-    redactFinancial: boolean
-  }
+    redactPII: boolean;
+    redactFinancial: boolean;
+  };
+  retentionPolicies: RetentionPolicy[];
 }
 
 // For the PDF redaction functionality
