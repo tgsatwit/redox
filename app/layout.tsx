@@ -33,9 +33,8 @@ export default function RootLayout({
           >
             <div className="border-b">
               <div className="flex h-16 items-center px-4 container">
-                <Link href="/" className="flex items-center gap-2 font-semibold">
-                  <FileText className="h-6 w-6" />
-                  <span>Document Processor</span>
+                <Link href="/" className="flex items-center gap-2 font-bold">
+                  <span>Doc.ER</span>
                 </Link>
                 <nav className="ml-auto flex gap-4 sm:gap-6 items-center">
                   <Link

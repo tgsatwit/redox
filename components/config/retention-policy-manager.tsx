@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
-import { Pencil, Trash2, Plus } from "lucide-react"
+import { Pencil, Trash2, Plus, Loader2 } from "lucide-react"
 
 // Helper function to convert days to years (rounded to 2 decimal places)
 const daysToYears = (days: number) => Number((days / 365).toFixed(2))
@@ -38,14 +38,16 @@ export function RetentionPolicyManager() {
   const { config, addRetentionPolicy, updateRetentionPolicy, deleteRetentionPolicy } = useConfigStore()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingPolicy, setEditingPolicy] = useState<RetentionPolicy | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     durationYears: 1 // Default to 1 year
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    console.log("Form submission started")
     
     if (!formData.name || !formData.description || !formData.durationYears) {
       toast({
@@ -56,30 +58,81 @@ export function RetentionPolicyManager() {
       return
     }
 
-    // Convert years to days for storage
-    const duration = yearsToDays(formData.durationYears)
-
-    if (editingPolicy) {
-      updateRetentionPolicy(editingPolicy.id, { ...formData, duration })
+    setIsLoading(true)
+    try {
+      // Convert years to days for storage
+      const duration = yearsToDays(formData.durationYears)
+      
+      // First update local state via the store
+      if (editingPolicy) {
+        updateRetentionPolicy(editingPolicy.id, { ...formData, duration })
+      } else {
+        addRetentionPolicy({ ...formData, duration })
+      }
+      
+      // Then update DynamoDB via API
+      const apiData = {
+        name: formData.name,
+        description: formData.description,
+        duration
+      }
+      
+      console.log('Sending data to API:', apiData)
+      
+      if (editingPolicy) {
+        // Update existing policy
+        const response = await fetch('/api/retention-policies', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: editingPolicy.id, ...apiData })
+        })
+        
+        console.log('API response status:', response.status)
+        
+        if (!response.ok) {
+          throw new Error(`Failed to update policy in database: ${response.status}`)
+        }
+        
+        toast({
+          title: "Success",
+          description: "Retention policy updated successfully in database"
+        })
+      } else {
+        // Create new policy
+        const response = await fetch('/api/retention-policies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(apiData)
+        })
+        
+        console.log('API response status:', response.status)
+        
+        if (!response.ok) {
+          throw new Error(`Failed to create policy in database: ${response.status}`)
+        }
+        
+        toast({
+          title: "Success",
+          description: "Retention policy added successfully to database"
+        })
+      }
+    } catch (error) {
+      console.error('Error saving retention policy to database:', error)
       toast({
-        title: "Success",
-        description: "Retention policy updated successfully"
+        title: "Database Error",
+        description: error instanceof Error ? error.message : "Failed to save to database",
+        variant: "destructive"
       })
-    } else {
-      addRetentionPolicy({ ...formData, duration })
-      toast({
-        title: "Success",
-        description: "Retention policy added successfully"
+    } finally {
+      setIsLoading(false)
+      setIsDialogOpen(false)
+      setEditingPolicy(null)
+      setFormData({
+        name: "",
+        description: "",
+        durationYears: 1
       })
     }
-
-    setIsDialogOpen(false)
-    setEditingPolicy(null)
-    setFormData({
-      name: "",
-      description: "",
-      durationYears: 1
-    })
   }
 
   const handleEdit = (policy: RetentionPolicy) => {
@@ -93,12 +146,42 @@ export function RetentionPolicyManager() {
   }
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this retention policy?")) {
+    if (!window.confirm("Are you sure you want to delete this retention policy?")) {
+      return
+    }
+    
+    setIsLoading(true)
+    try {
+      // First update local state
       deleteRetentionPolicy(id)
+      
+      // Then update DynamoDB via API
+      console.log('Deleting policy from database:', id)
+      const response = await fetch('/api/retention-policies', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      })
+      
+      console.log('API response status:', response.status)
+      
+      if (!response.ok) {
+        throw new Error(`Failed to delete policy from database: ${response.status}`)
+      }
+      
       toast({
         title: "Success",
-        description: "Retention policy deleted successfully"
+        description: "Retention policy deleted successfully from database"
       })
+    } catch (error) {
+      console.error('Error deleting retention policy from database:', error)
+      toast({
+        title: "Database Error",
+        description: error instanceof Error ? error.message : "Failed to delete from database",
+        variant: "destructive"
+      })
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -109,7 +192,7 @@ export function RetentionPolicyManager() {
           <CardTitle>Retention Policies</CardTitle>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button>
+              <Button disabled={isLoading}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Policy
               </Button>
@@ -132,6 +215,7 @@ export function RetentionPolicyManager() {
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder="e.g., Standard 2-Year Retention"
+                      disabled={isLoading}
                     />
                   </div>
                   <div className="space-y-2">
@@ -141,6 +225,7 @@ export function RetentionPolicyManager() {
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       placeholder="Describe the purpose and requirements of this retention policy"
+                      disabled={isLoading}
                     />
                   </div>
                   <div className="space-y-2">
@@ -153,12 +238,20 @@ export function RetentionPolicyManager() {
                       value={formData.durationYears}
                       onChange={(e) => setFormData({ ...formData, durationYears: parseFloat(e.target.value) })}
                       placeholder="e.g., 2 for two years"
+                      disabled={isLoading}
                     />
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button type="submit">
-                    {editingPolicy ? "Update Policy" : "Add Policy"}
+                  <Button type="submit" disabled={isLoading}>
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {editingPolicy ? "Updating..." : "Adding..."}
+                      </>
+                    ) : (
+                      editingPolicy ? "Update Policy" : "Add Policy"
+                    )}
                   </Button>
                 </DialogFooter>
               </form>
@@ -187,6 +280,7 @@ export function RetentionPolicyManager() {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleEdit(policy)}
+                        disabled={isLoading}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -194,6 +288,7 @@ export function RetentionPolicyManager() {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDelete(policy.id)}
+                        disabled={isLoading}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>

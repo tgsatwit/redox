@@ -37,27 +37,15 @@
 				"dynamodb:DeleteTable",
 				"dynamodb:DescribeTable",
 				"dynamodb:ListTables",
-				"dynamodb:UpdateTable",
 				"dynamodb:GetItem",
-				"dynamodb:PutItem",
-				"dynamodb:DeleteItem",
-				"dynamodb:BatchGetItem",
-				"dynamodb:BatchWriteItem",
-				"dynamodb:Query",
-				"dynamodb:Scan",
-				"dynamodb:UpdateItem"
-			],
-			"Resource": [
-				"arn:aws:dynamodb:ap-southeast-2:*:table/document-classification-feedback",
-				"arn:aws:dynamodb:ap-southeast-2:*:table/document-classification-feedback/index/*"
-			]
-		},
-		{
-			"Effect": "Allow",
-			"Action": [
-				"dynamodb:CreateTable",
-				"dynamodb:DescribeTable",
-				"dynamodb:ListTables"
+                "dynamodb:PutItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:UpdateItem",
+				"dynamodb:UpdateTable"
 			],
 			"Resource": "*"
 		},
@@ -74,14 +62,16 @@
 				"dynamodb:BatchWriteItem"
 			],
 			"Resource": [
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-config",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-doctypes",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-subtypes",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-retention-policies"
+				"arn:aws:dynamodb:*:*:table/document-processor-config",
+				"arn:aws:dynamodb:*:*:table/document-processor-doctypes",
+				"arn:aws:dynamodb:*:*:table/document-processor-subtypes",
+				"arn:aws:dynamodb:*:*:table/document-processor-elements",
+				"arn:aws:dynamodb:*:*:table/document-processor-datasets",
+				"arn:aws:dynamodb:*:*:table/document-processor-examples",
+				"arn:aws:dynamodb:*:*:table/document-classification-feedback",
+				"arn:aws:dynamodb:*:*:table/document-processor-retention-policies",
+				"arn:aws:dynamodb:*:*:table/document-processor-prompt-categories",
+				"arn:aws:dynamodb:*:*:table/document-processor-prompts"
 			]
 		},
 		{
@@ -91,15 +81,15 @@
 				"dynamodb:Scan"
 			],
 			"Resource": [
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-subtypes/index/documentTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-config/index/documentTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-doctypes/index/documentTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements/index/documentTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-elements/index/subTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-examples/index/documentTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-processor-datasets/index/documentTypeId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/documentId-index",
-				"arn:aws:dynamodb:ap-southeast-2:205930635809:table/document-classification-feedback/index/timestamp-index"
+				"arn:aws:dynamodb:*:*:table/document-processor-subtypes/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-config/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-doctypes/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-elements/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-examples/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-datasets/index/*",
+				"arn:aws:dynamodb:*:*:table/document-classification-feedback/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-prompts/index/*",
+				"arn:aws:dynamodb:*:*:table/document-processor-retention-policies/index/*"
 			]
 		},
 		{
@@ -108,7 +98,7 @@
 				"ssm:GetParameter",
 				"ssm:GetParametersByPath"
 			],
-			"Resource": "arn:aws:ssm:ap-southeast-2:205930635809:parameter/amplify/d3uu2r0jj682y6/main/*"
+			"Resource": "arn:aws:ssm:*:*:parameter/amplify/d3uu2r0jj682y6/main/*"
 		}
 	]
 }

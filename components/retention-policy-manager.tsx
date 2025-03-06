@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useConfigStoreDB } from "@/lib/config-store-db"
 import { RetentionPolicy } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -35,128 +35,149 @@ const daysToYears = (days: number) => Number((days / 365).toFixed(2))
 const yearsToDays = (years: number) => Math.round(years * 365)
 
 export function RetentionPolicyManager() {
-  const { config } = useConfigStoreDB()
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [editingPolicy, setEditingPolicy] = useState<RetentionPolicy | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  // Get the full store with all methods
+  const { 
+    config, 
+    initialize, 
+    // Add methods we need for operating on retention policies
+    addRetentionPolicy,
+    updateRetentionPolicy,
+    deleteRetentionPolicy
+  } = useConfigStoreDB();
+  
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingPolicy, setEditingPolicy] = useState<RetentionPolicy | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [policies, setPolicies] = useState<RetentionPolicy[]>([]);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     durationYears: 1 // Default to 1 year
-  })
+  });
+
+  // Initialize policies from config
+  useEffect(() => {
+    if (config.retentionPolicies) {
+      setPolicies(config.retentionPolicies);
+    }
+  }, [config.retentionPolicies]);
+
+  // Initial data load if needed
+  useEffect(() => {
+    console.log("Component mounted, refreshing data if needed...");
+    if (!config.retentionPolicies || config.retentionPolicies.length === 0) {
+      console.log("No policies in store, initializing...");
+      initialize();
+    }
+  }, [initialize, config.retentionPolicies]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    console.log("Form submission started");
+    e.preventDefault();
     
     if (!formData.name || !formData.description || !formData.durationYears) {
+      console.log("Validation failed:", { formData });
       toast({
         title: "Validation Error",
         description: "Please fill in all fields",
         variant: "destructive"
-      })
-      return
+      });
+      return;
     }
 
-    setIsLoading(true)
+    setIsLoading(true);
     try {
       // Convert years to days for storage
-      const duration = yearsToDays(formData.durationYears)
-      const policyData = { ...formData, duration }
-
+      const duration = yearsToDays(formData.durationYears);
+      
+      console.log('Policy operation starting:', editingPolicy ? 'UPDATE' : 'CREATE');
+      
       if (editingPolicy) {
-        // Update existing policy
-        const response = await fetch('/api/retention-policies', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: editingPolicy.id, ...policyData })
-        })
-
-        if (!response.ok) throw new Error('Failed to update policy')
-
+        // Update existing policy using store method
+        console.log('Updating policy:', editingPolicy.id, { ...formData, duration });
+        await updateRetentionPolicy(editingPolicy.id, { 
+          name: formData.name,
+          description: formData.description,
+          duration
+        });
+        
         toast({
           title: "Success",
           description: "Retention policy updated successfully"
-        })
+        });
       } else {
-        // Create new policy
-        const response = await fetch('/api/retention-policies', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(policyData)
-        })
-
-        if (!response.ok) throw new Error('Failed to create policy')
-
+        // Create new policy using store method
+        console.log('Creating new policy:', { ...formData, duration });
+        await addRetentionPolicy({ 
+          name: formData.name,
+          description: formData.description,
+          duration
+        });
+        
         toast({
           title: "Success",
           description: "Retention policy added successfully"
-        })
+        });
       }
-
-      // Refresh the page to update the list
-      window.location.reload()
+      
+      // The store will update automatically, so we just need to wait a bit
+      await initialize(); // Refresh the store data
     } catch (error) {
-      console.error('Error saving retention policy:', error)
+      console.error('Error saving retention policy:', error);
       toast({
         title: "Error",
-        description: "Failed to save retention policy",
-        variant: "destructive"
-      })
+        description: `Failed to save retention policy: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
     } finally {
-      setIsLoading(false)
-      setIsDialogOpen(false)
-      setEditingPolicy(null)
+      setIsLoading(false);
+      setIsDialogOpen(false);
+      setEditingPolicy(null);
       setFormData({
         name: "",
         description: "",
         durationYears: 1
-      })
+      });
     }
-  }
+  };
 
   const handleEdit = (policy: RetentionPolicy) => {
-    setEditingPolicy(policy)
+    console.log("Editing policy:", policy);
+    setEditingPolicy(policy);
     setFormData({
       name: policy.name,
       description: policy.description,
       durationYears: daysToYears(policy.duration)
-    })
-    setIsDialogOpen(true)
-  }
+    });
+    setIsDialogOpen(true);
+  };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this retention policy?")) {
-      return
+      return;
     }
 
-    setIsLoading(true)
+    setIsLoading(true);
     try {
-      const response = await fetch('/api/retention-policies', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      })
-
-      if (!response.ok) throw new Error('Failed to delete policy')
-
+      console.log('Deleting policy:', id);
+      await deleteRetentionPolicy(id);
+      
       toast({
         title: "Success",
         description: "Retention policy deleted successfully"
-      })
-
-      // Refresh the page to update the list
-      window.location.reload()
+      });
+      
+      // Refresh the store data
+      await initialize();
     } catch (error) {
-      console.error('Error deleting retention policy:', error)
+      console.error('Error deleting retention policy:', error);
       toast({
         title: "Error",
-        description: "Failed to delete retention policy",
-        variant: "destructive"
-      })
+        description: `Failed to delete retention policy: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <div className="container mx-auto py-6">
@@ -165,13 +186,24 @@ export function RetentionPolicyManager() {
           <CardTitle>Retention Policies</CardTitle>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button disabled={isLoading}>
+              <Button disabled={isLoading} onClick={() => {
+                console.log("Add Policy button clicked");
+                setEditingPolicy(null);
+                setFormData({
+                  name: "",
+                  description: "",
+                  durationYears: 1
+                });
+              }}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Policy
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <form onSubmit={handleSubmit}>
+              <form onSubmit={(e) => {
+                console.log("Form submitted via onSubmit");
+                handleSubmit(e);
+              }}>
                 <DialogHeader>
                   <DialogTitle>
                     {editingPolicy ? "Edit Retention Policy" : "Add Retention Policy"}
@@ -186,7 +218,10 @@ export function RetentionPolicyManager() {
                     <Input
                       id="name"
                       value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      onChange={(e) => {
+                        console.log("Name changed:", e.target.value);
+                        setFormData({ ...formData, name: e.target.value });
+                      }}
                       placeholder="e.g., Standard 2-Year Retention"
                       disabled={isLoading}
                     />
@@ -216,7 +251,14 @@ export function RetentionPolicyManager() {
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button type="submit" disabled={isLoading}>
+                  <Button 
+                    type="submit" 
+                    disabled={isLoading}
+                    onClick={(e) => {
+                      console.log("Submit button clicked");
+                      // The actual submission is handled by the form's onSubmit
+                    }}
+                  >
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -242,7 +284,7 @@ export function RetentionPolicyManager() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {config.retentionPolicies?.map((policy) => (
+              {policies?.map((policy) => (
                 <TableRow key={policy.id}>
                   <TableCell>{policy.name}</TableCell>
                   <TableCell>{policy.description}</TableCell>
@@ -269,7 +311,7 @@ export function RetentionPolicyManager() {
                   </TableCell>
                 </TableRow>
               ))}
-              {(!config.retentionPolicies || config.retentionPolicies.length === 0) && (
+              {(!policies || policies.length === 0) && (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
                     No retention policies configured. Click "Add Policy" to create one.
@@ -281,5 +323,5 @@ export function RetentionPolicyManager() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 } 

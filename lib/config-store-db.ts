@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { AppConfig, DocumentTypeConfig, DataElementConfig, DocumentSubTypeConfig, TrainingDataset, TrainingExample, PromptCategory, Prompt } from './types'
+import { AppConfig, DocumentTypeConfig, DataElementConfig, DocumentSubTypeConfig, TrainingDataset, TrainingExample, PromptCategory, Prompt, RetentionPolicy } from './types'
 import { createId } from '@paralleldrive/cuid2'
 
 // Initialize default data elements - using empty arrays
@@ -62,6 +62,11 @@ type ConfigState = {
   // Model management
   updateModelStatus: (documentTypeId: string, datasetId: string, modelStatus: TrainingDataset['modelStatus'], modelId?: string, modelArn?: string) => Promise<void>
   setDefaultModelForDocType: (documentTypeId: string, modelId: string) => Promise<void>
+  
+  // Retention policy management
+  addRetentionPolicy: (policy: Omit<RetentionPolicy, 'id' | 'createdAt' | 'updatedAt'>) => Promise<RetentionPolicy>
+  updateRetentionPolicy: (id: string, updates: Partial<Omit<RetentionPolicy, 'id' | 'createdAt'>>) => Promise<void>
+  deleteRetentionPolicy: (id: string) => Promise<void>
   
   resetToDefaults: () => Promise<void>
 
@@ -953,6 +958,115 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
       console.error(`Error setting default model for document type ${documentTypeId}:`, error);
       set({ 
         error: error.message || 'Failed to set default model',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+  
+  // Retention policy management
+  addRetentionPolicy: async (policy) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch('/api/retention-policies', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(policy)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      const newPolicy = await response.json();
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          retentionPolicies: [...(state.config.retentionPolicies || []), newPolicy]
+        },
+        isLoading: false
+      }));
+      
+      return newPolicy;
+    } catch (error: any) {
+      console.error('Error adding retention policy:', error);
+      set({ 
+        error: error.message || 'Failed to add retention policy',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+  
+  updateRetentionPolicy: async (id, updates) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch('/api/retention-policies', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ id, ...updates })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      // After successful update, get the updated policy from the response
+      const responseData = await response.json();
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          retentionPolicies: state.config.retentionPolicies?.map(policy => 
+            policy.id === id ? { ...policy, ...updates, updatedAt: Date.now() } : policy
+          ) || []
+        },
+        isLoading: false
+      }));
+    } catch (error: any) {
+      console.error(`Error updating retention policy ${id}:`, error);
+      set({ 
+        error: error.message || 'Failed to update retention policy',
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+  
+  deleteRetentionPolicy: async (id) => {
+    try {
+      set({ isLoading: true, error: null });
+      
+      const response = await fetch('/api/retention-policies', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ id })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      set(state => ({
+        config: {
+          ...state.config,
+          retentionPolicies: state.config.retentionPolicies?.filter(policy => policy.id !== id) || []
+        },
+        isLoading: false
+      }));
+    } catch (error: any) {
+      console.error(`Error deleting retention policy ${id}:`, error);
+      set({ 
+        error: error.message || 'Failed to delete retention policy',
         isLoading: false 
       });
       throw error;

@@ -2048,23 +2048,49 @@ export class DynamoDBConfigService {
         return;
       }
 
+      // Build update expression dynamically based on what fields are provided
+      const expressionParts: string[] = [];
+      const expressionAttributeNames: Record<string, string> = {};
+      const expressionAttributeValues: Record<string, any> = {
+        ':updatedAt': Date.now()
+      };
+
+      // Always update the updatedAt field
+      expressionParts.push('#updatedAt = :updatedAt');
+      expressionAttributeNames['#updatedAt'] = 'updatedAt';
+
+      // Add other fields conditionally
+      if (updates.name !== undefined) {
+        expressionParts.push('#name = :name');
+        expressionAttributeNames['#name'] = 'name';
+        expressionAttributeValues[':name'] = updates.name;
+      }
+
+      if (updates.description !== undefined) {
+        expressionParts.push('#description = :description');
+        expressionAttributeNames['#description'] = 'description';
+        expressionAttributeValues[':description'] = updates.description;
+      }
+
+      if (updates.duration !== undefined) {
+        expressionParts.push('#duration = :duration');
+        expressionAttributeNames['#duration'] = 'duration';
+        expressionAttributeValues[':duration'] = updates.duration;
+      }
+
+      const updateExpression = `SET ${expressionParts.join(', ')}`;
+      
+      console.log('Updating retention policy with expression:', updateExpression);
+      console.log('Attribute names:', expressionAttributeNames);
+      console.log('Attribute values:', expressionAttributeValues);
+
       await docClient.send(
         new UpdateCommand({
           TableName: RETENTION_POLICY_TABLE,
           Key: { id },
-          UpdateExpression: 'SET #name = :name, #description = :description, #duration = :duration, #updatedAt = :updatedAt',
-          ExpressionAttributeNames: {
-            '#name': 'name',
-            '#description': 'description',
-            '#duration': 'duration',
-            '#updatedAt': 'updatedAt'
-          },
-          ExpressionAttributeValues: {
-            ':name': updates.name,
-            ':description': updates.description,
-            ':duration': updates.duration,
-            ':updatedAt': Date.now()
-          }
+          UpdateExpression: updateExpression,
+          ExpressionAttributeNames: expressionAttributeNames,
+          ExpressionAttributeValues: expressionAttributeValues
         })
       );
     } catch (error) {

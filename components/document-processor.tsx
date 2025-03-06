@@ -60,7 +60,8 @@ import {
   CheckIcon, 
   Info, 
   FileJson,
-  Download
+  Download,
+  FileIcon
 } from "lucide-react"
 
 // Services & Utils
@@ -478,8 +479,45 @@ export function DocumentProcessor() {
     }
   })
 
+  // Add default retention policies when none are available
+  const [defaultRetentionPolicies] = useState([
+    {
+      id: 'retention-1',
+      name: 'Standard Retention (30 days)',
+      description: 'Standard retention period of 30 days',
+      duration: 30,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    },
+    {
+      id: 'retention-2', 
+      name: 'Extended Retention (90 days)',
+      description: 'Extended retention period of 90 days',
+      duration: 90,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    },
+    {
+      id: 'retention-3',
+      name: 'Long-term Retention (1 year)',
+      description: 'Long-term retention period of 1 year',
+      duration: 365,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+  ]);
+
+  // Get the effective retention policies (use defaults if none are available)
+  const effectiveRetentionPolicies = useMemo(() => {
+    return config.retentionPolicies && config.retentionPolicies.length > 0 
+      ? config.retentionPolicies 
+      : defaultRetentionPolicies;
+  }, [config.retentionPolicies, defaultRetentionPolicies]);
+
   // Add scanForTFN state variable
   const [scanForTFN, setScanForTFN] = useState<boolean>(false);
+  // Add TFN scanning result state
+  const [tfnScannedResult, setTfnScannedResult] = useState<{ tfnIdentified: boolean; rawResponse: string } | null>(null);
 
   // Add these state variables with the other useState declarations (around line 400)
   const [requiredElementsCollapsed, setRequiredElementsCollapsed] = useState(false);
@@ -494,6 +532,12 @@ export function DocumentProcessor() {
 
   // Add this state variable near the other state declarations
   const [redactionsAutoApplied, setRedactionsAutoApplied] = useState(false);
+  
+  // Add a new state variable for the Document Data card's Data Elements section
+  const [documentDataElementsCollapsed, setDocumentDataElementsCollapsed] = useState(false);
+  
+  // Add a new state for tracking selected elements in the document data section
+  const [documentDataSelectedElements, setDocumentDataSelectedElements] = useState<string[]>([]);
   
   // Add derived state variables based on existing values
   const activeDocType = config.documentTypes.find((dt: { id: string }) => dt.id === activeDocumentTypeId);
@@ -754,6 +798,11 @@ export function DocumentProcessor() {
       let textToAnalyze = extractedText;
       let didExtractText = false;
       
+      // If scanForTFN is enabled, we need to make sure text extraction is enabled
+      if (scanForTFN && !useTextExtractionForClassification) {
+        setUseTextExtractionForClassification(true);
+      }
+      
       // Extract text if not already available
       if (!textToAnalyze) {
         toast({
@@ -942,41 +991,72 @@ export function DocumentProcessor() {
                 setSelectedSubTypeId(matchingSubType.id);
                 console.log("Selected subtype ID set to:", matchingSubType.id);
               }, 100);
-            } else {
-              console.log("GPT Classification: Subtype not found:", result.subType);
             }
-          }
-          
-          // Update classification result state for display in the document viewer
-          setClassificationResult({
-            documentType: matchingDocType.name,
-            confidence: result.confidence,
-            modelId: "gpt-4o",
-            classifierId: "gpt"
-          });
-          
-          // Try to match extracted text with configured data elements now that we have a document type
-          if (textToAnalyze) {
-            tryMatchExtractedTextToElements(textToAnalyze);
           }
         }
       }
-      
-      toast({
-        title: result.documentType 
-          ? `Classified as: ${result.documentType}` 
-          : "Classification inconclusive",
-        description: result.subType 
-          ? `Sub-type: ${result.subType}` 
-          : "Please select document type manually",
-        variant: result.documentType ? "default" : "default"
-      });
+
+      // If scanForTFN is enabled, perform TFN scanning after classification
+      if (scanForTFN && textToAnalyze) {
+        try {
+          // Show toast for TFN scanning
+          toast({
+            title: "Scanning for TFN",
+            description: "Checking document for Tax File Numbers",
+            variant: "default"
+          });
+          
+          // Call the TFN scanning API
+          const tfnResponse = await fetch('/api/scan-for-tfn', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text: textToAnalyze
+            }),
+          });
+          
+          if (!tfnResponse.ok) {
+            throw new Error(`TFN scanning failed: ${tfnResponse.statusText}`);
+          }
+          
+          const tfnResult = await tfnResponse.json();
+          
+          // Store the TFN scanning result
+          setTfnScannedResult(tfnResult);
+          
+          // Debug log
+          console.log("TFN Scanning Result:", JSON.stringify(tfnResult, null, 2));
+          
+          // Show toast with the result
+          toast({
+            title: tfnResult.tfnIdentified ? "TFN identified" : "No TFN identified",
+            description: tfnResult.tfnIdentified 
+              ? "Tax File Number was found in the document" 
+              : "No Tax File Number was found in the document",
+            variant: tfnResult.tfnIdentified ? "destructive" : "default"
+          });
+        } catch (error) {
+          console.error("Error scanning for TFN:", error);
+          toast({
+            title: "TFN scanning failed",
+            description: error instanceof Error ? error.message : "Unknown error occurred",
+            variant: "destructive"
+          });
+        }
+      } else {
+        // Reset TFN scanning result if scanning is disabled
+        setTfnScannedResult(null);
+      }
       
     } catch (error) {
-      console.error("GPT classification error:", error);
+      console.error("GPT Classification error:", error);
+      setProcessError("Classification failed: " + (error instanceof Error ? error.message : "Unknown error"));
+      
       toast({
         title: "Classification failed",
-        description: error instanceof Error ? error.message : "An error occurred",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
         variant: "destructive"
       });
     } finally {
@@ -2083,7 +2163,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
       
       // Save original document if selected
       if (processingOptions.saveDocument.original && selectedRetentionPolicies.original) {
-        const originalRetentionPolicy = config.retentionPolicies.find(p => p.id === selectedRetentionPolicies.original);
+        const originalRetentionPolicy = effectiveRetentionPolicies.find(p => p.id === selectedRetentionPolicies.original);
         if (!originalRetentionPolicy) {
           throw new Error("Selected retention policy for original document not found");
         }
@@ -2117,7 +2197,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
       
       // Save redacted document if selected and available
       if (processingOptions.saveDocument.redacted && selectedRetentionPolicies.redacted && redactedImageUrl) {
-        const redactedRetentionPolicy = config.retentionPolicies.find(p => p.id === selectedRetentionPolicies.redacted);
+        const redactedRetentionPolicy = effectiveRetentionPolicies.find(p => p.id === selectedRetentionPolicies.redacted);
         if (!redactedRetentionPolicy) {
           throw new Error("Selected retention policy for redacted document not found");
         }
@@ -2532,6 +2612,17 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
     }
   }, [workflowStep, processingOptions.redactElements, extractedElements]);
 
+  // Toggle element selection function for the document data section
+  const toggleDocumentDataElementSelection = (elementId: string) => {
+    setDocumentDataSelectedElements(prev => {
+      if (prev.includes(elementId)) {
+        return prev.filter(id => id !== elementId);
+      } else {
+        return [...prev, elementId];
+      }
+    });
+  };
+
   return (
     <>
       {/* Main heading and workflow indicators */}
@@ -2658,7 +2749,13 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                       <Switch 
                         id="scan-tfn" 
                         checked={scanForTFN}
-                        onCheckedChange={(checked) => setScanForTFN(checked)}
+                        onCheckedChange={(checked) => {
+                          setScanForTFN(checked);
+                          // If turning on TFN scanning, make sure text extraction is also enabled
+                          if (checked && !useTextExtractionForClassification) {
+                            setUseTextExtractionForClassification(true);
+                          }
+                        }}
                       />
                     </div>
                     
@@ -2944,7 +3041,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                             <SelectValue placeholder="Select Retention Policy" />
                           </SelectTrigger>
                           <SelectContent>
-                            {config.retentionPolicies.map((policy) => (
+                            {effectiveRetentionPolicies.map((policy) => (
                               <SelectItem key={policy.id} value={policy.id}>
                                 {policy.name} ({policy.duration} days)
                               </SelectItem>
@@ -2976,7 +3073,7 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                             <SelectValue placeholder="Select Retention Policy" />
                           </SelectTrigger>
                           <SelectContent>
-                            {config.retentionPolicies.map((policy) => (
+                            {effectiveRetentionPolicies.map((policy) => (
                               <SelectItem key={policy.id} value={policy.id}>
                                 {policy.name} ({policy.duration} days)
                               </SelectItem>
@@ -3035,7 +3132,9 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                       className="p-3 border-b bg-muted/20 flex justify-between items-center"
                     >
                       <div className="flex items-center">
-                        <h3 className="text-lg font-medium mr-4">Data Elements</h3>
+                        <h3 className="text-lg font-medium">Data Elements</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
                         <Button 
                           onClick={handleApplyRedactions}
                           disabled={isProcessing || selectedElements.length === 0}
@@ -3053,9 +3152,9 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                             </>
                           )}
                         </Button>
-                      </div>
-                      <div className="flex items-center cursor-pointer" onClick={() => setResultsDataElementsCollapsed(!resultsDataElementsCollapsed)}>
-                        <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${resultsDataElementsCollapsed ? "rotate-180" : ""}`} />
+                        <div className="cursor-pointer" onClick={() => setResultsDataElementsCollapsed(!resultsDataElementsCollapsed)}>
+                          <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${resultsDataElementsCollapsed ? "rotate-180" : ""}`} />
+                        </div>
                       </div>
                     </div>
                     <div id="amalgamated-data-content" className={resultsDataElementsCollapsed ? "hidden" : "p-2"}>
@@ -3374,428 +3473,382 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                       </>
                     )}
                   </div>
+                  
+                  {/* Add TFN scanning result */}
+                  {scanForTFN && tfnScannedResult && (
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t">
+                      <span className="text-sm font-medium">TFN Status:</span>
+                      <Badge variant="outline" className={`text-xs ${
+                        tfnScannedResult.tfnIdentified
+                          ? 'bg-red-50 text-red-700'
+                          : 'bg-green-50 text-green-700'
+                      }`}>
+                        {tfnScannedResult.tfnIdentified ? 'TFN Identified' : 'No TFN Identified'}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
             
             {imageUrl ? (
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="mb-4">
-                  <TabsTrigger value="original">Original Document</TabsTrigger>
-                  {extractedText && <TabsTrigger value="text">Extracted Text</TabsTrigger>}
-                  {extractedElements.length > 0 && activeDocumentTypeId && (
-                    <TabsTrigger value="extracted">Data Elements</TabsTrigger>
-                  )}
-                  {documentSummary && (
-                    <TabsTrigger value="summary">Document Summary</TabsTrigger>
-                  )}
-                  {redactedImageUrl && <TabsTrigger value="redacted">Redacted Document</TabsTrigger>}
-                </TabsList>
-                
-                <TabsContent value="original" className="mt-0">
-                  <div className="border rounded-md overflow-hidden bg-muted/20 p-1">
-                    {/* Moved document info here */}
-                    {file && (
-                      <div className="p-2 border-b mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{file.name}</span>
-                            <Badge variant="outline" className="text-xs">
-                              {file.type === 'application/pdf' ? 'PDF' : 
-                               file.type?.includes('image') ? 'Image' : 'Document'}
-                            </Badge>
+              <>
+                {/* Document Viewer Card */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium mb-2">Document Viewer</h3>
+                  <Tabs defaultValue={redactedImageUrl ? "redacted" : "original"} className="w-full">
+                    <TabsList className="mb-4">
+                      <TabsTrigger value="original">Original Document</TabsTrigger>
+                      {redactedImageUrl && <TabsTrigger value="redacted">Redacted Document</TabsTrigger>}
+                    </TabsList>
+                    
+                    <TabsContent value="original" className="mt-0">
+                      <div className="border rounded-md overflow-hidden bg-muted/20 p-1">
+                        {/* Moved document info here */}
+                        {file && (
+                          <div className="p-2 border-b mb-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm font-medium">{file.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</span>
+                                {isFileFormatSupported() && (
+                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+                                    Supported Format
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</span>
-                            {isFileFormatSupported() && (
-                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
-                                Supported Format
-                              </Badge>
+                        )}
+                        <div className="max-h-[550px] overflow-auto p-3">
+                          <DocumentViewer
+                            imageUrl={imageUrl}
+                            fileType={file?.type}
+                            onPdfLoadError={handlePdfViewerError}
+                          />
+                        </div>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="redacted" className="mt-0">
+                      <div className="border rounded-md overflow-hidden bg-muted/20 p-1">
+                        <div className="flex justify-end mb-2 px-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!redactedImageUrl}
+                            onClick={() => {
+                              if (redactedImageUrl) {
+                                const link = document.createElement('a');
+                                link.href = redactedImageUrl;
+                                link.download = file ? `redacted_${file.name.replace(/\.[^/.]+$/, "")}.pdf` : "redacted_document.pdf";
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }
+                            }}
+                          >
+                            <FileUp className="h-4 w-4 mr-2" />
+                            Download Redacted
+                          </Button>
+                        </div>
+                        <div className="max-h-[550px] overflow-auto p-3">
+                          {redactedImageUrl ? (
+                            <DocumentViewer
+                              imageUrl={redactedImageUrl as string}
+                              fileType={file?.type}
+                              onPdfLoadError={handlePdfViewerError}
+                            />
+                          ) : (
+                            <div className="flex items-center justify-center h-64">
+                              <p className="text-muted-foreground">No redacted image available</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+                
+                {/* Document Data Card */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium mb-2">Document Data</h3>
+                  <Tabs defaultValue={extractedElements.length > 0 && activeDocumentTypeId ? "extracted" : (extractedText ? "text" : "summary")} className="w-full">
+                    <TabsList className="mb-4">
+                      {extractedText && <TabsTrigger value="text">Extracted Text</TabsTrigger>}
+                      {extractedElements.length > 0 && activeDocumentTypeId && (
+                        <TabsTrigger value="extracted">Data Elements</TabsTrigger>
+                      )}
+                      {documentSummary && (
+                        <TabsTrigger value="summary">Document Summary</TabsTrigger>
+                      )}
+                    </TabsList>
+                    
+                    <TabsContent value="extracted" className="mt-0">
+                      <div className="border rounded-md overflow-hidden bg-muted/10">
+                        <div 
+                          className="p-3 border-b bg-muted/20 flex justify-between items-center"
+                        >
+                          <div className="flex items-center">
+                            <h3 className="text-lg font-medium">Data Elements</h3>
+                          </div>
+                          <div className="cursor-pointer" onClick={() => setDocumentDataElementsCollapsed(!documentDataElementsCollapsed)}>
+                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${documentDataElementsCollapsed ? "rotate-180" : ""}`} />
+                          </div>
+                        </div>
+                        <div id="document-data-elements-content" className={documentDataElementsCollapsed ? "hidden" : "p-2"}>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-[20%]">Field Name</TableHead>
+                                <TableHead className="w-[10%]">Type</TableHead>
+                                <TableHead className="w-[15%]">Category</TableHead>
+                                <TableHead className="w-[15%]">Action</TableHead>
+                                <TableHead className="w-[25%]">Value</TableHead>
+                                <TableHead className="w-[15%]">Identified</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {/* Render combined data elements */}
+                              {activeDocType && activeDocType.dataElements
+                                .map(element => {
+                                  // Find matching extracted element (if any)
+                                  const matchingExtracted = extractedElements.find(
+                                    extractedElement => {
+                                      const typedElement = extractedElement as ExtendedRedactionElement;
+                                      return typedElement.label === element.name && !typedElement.missing;
+                                    }
+                                  );
+                                  
+                                  // Check if this element was found in extracted elements
+                                  const isIdentified = !!matchingExtracted;
+                                  const typedMatchingElement = matchingExtracted as ExtendedRedactionElement;
+                                  
+                                  return (
+                                    <TableRow key={element.id}>
+                                      <TableCell className="font-medium">
+                                        {element.name}
+                                        {element.required && (
+                                          <Badge variant="outline" className="ml-2 text-xs">Required</Badge>
+                                        )}
+                                      </TableCell>
+                                      <TableCell>{element.type}</TableCell>
+                                      <TableCell>
+                                        <Badge variant={
+                                          element.category === 'PII' ? "destructive" : 
+                                          element.category === 'Financial' ? "default" :
+                                          "secondary"
+                                        } className="text-xs">
+                                          {element.category}
+                                        </Badge>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge variant={
+                                          element.action === 'Redact' ? "destructive" : 
+                                          element.action === 'ExtractAndRedact' ? "default" : 
+                                          element.action === 'Extract' ? "secondary" :
+                                          "outline"
+                                        } className="text-xs">
+                                          {element.action}
+                                        </Badge>
+                                      </TableCell>
+                                      <TableCell className="break-words">
+                                        <div className="whitespace-normal">
+                                          {matchingExtracted ? (typedMatchingElement.text || "Not found") : "Not found"}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge variant={isIdentified ? "default" : "outline"} className={`text-xs ${isIdentified ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-gray-100 text-gray-800 hover:bg-gray-200"}`}>
+                                          {isIdentified ? "Yes" : "No"}
+                                        </Badge>
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })
+                              }
+                              
+                              {/* Render subtype data elements if a subtype is selected */}
+                              {selectedSubTypeId && activeDocType?.subTypes?.find(st => st.id === selectedSubTypeId)?.dataElements
+                                .map(element => {
+                                  // Find matching extracted element (if any)
+                                  const matchingExtracted = extractedElements.find(
+                                    extractedElement => {
+                                      const typedElement = extractedElement as ExtendedRedactionElement;
+                                      return typedElement.label === element.name && !typedElement.missing;
+                                    }
+                                  );
+                                  
+                                  // Check if this element was found in extracted elements
+                                  const isIdentified = !!matchingExtracted;
+                                  const typedMatchingElement = matchingExtracted as ExtendedRedactionElement;
+                                  
+                                  return (
+                                    <TableRow key={element.id} className="bg-muted/10">
+                                      <TableCell className="font-medium">
+                                        {element.name}
+                                        {element.required && (
+                                          <Badge variant="outline" className="ml-2 text-xs">Required</Badge>
+                                        )}
+                                        <Badge variant="secondary" className="ml-2 text-xs">Subtype</Badge>
+                                      </TableCell>
+                                      <TableCell>{element.type}</TableCell>
+                                      <TableCell>
+                                        <Badge variant={
+                                          element.category === 'PII' ? "destructive" : 
+                                          element.category === 'Financial' ? "default" :
+                                          "secondary"
+                                        } className="text-xs">
+                                          {element.category}
+                                        </Badge>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge variant={
+                                          element.action === 'Redact' ? "destructive" : 
+                                          element.action === 'ExtractAndRedact' ? "default" : 
+                                          element.action === 'Extract' ? "secondary" :
+                                          "outline"
+                                        } className="text-xs">
+                                          {element.action}
+                                        </Badge>
+                                      </TableCell>
+                                      <TableCell className="break-words">
+                                        <div className="whitespace-normal">
+                                          {matchingExtracted ? (typedMatchingElement.text || "Not found") : "Not found"}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge variant={isIdentified ? "default" : "outline"} className={`text-xs ${isIdentified ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-gray-100 text-gray-800 hover:bg-gray-200"}`}>
+                                          {isIdentified ? "Yes" : "No"}
+                                        </Badge>
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })
+                              }
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="text" className="mt-0">
+                      <div className="space-y-4">
+                        {/* Extracted Text Section */}
+                        <div className="border rounded-md overflow-hidden bg-muted/10">
+                          <div
+                            className="p-3 border-b bg-muted/20 flex justify-between items-center cursor-pointer"
+                            onClick={() => setExtractedTextCollapsed(!extractedTextCollapsed)}
+                          >
+                            <h3 className="text-lg font-medium">Extracted Document Text</h3>
+                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${extractedTextCollapsed ? "rotate-180" : ""}`} />
+                          </div>
+                          <div id="extracted-text-content" className={extractedTextCollapsed ? "hidden" : "p-4"}>
+                            {extractedText ? (
+                              <div className="relative">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="absolute right-2 top-2"
+                                  onClick={() => {
+                                    if (extractedText) {
+                                      navigator.clipboard.writeText(extractedText);
+                                      toast({
+                                        title: "Copied to clipboard",
+                                        variant: "default"
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                                <pre className="text-xs whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                                  {extractedText}
+                                </pre>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground min-h-[200px]">
+                                <FileText className="h-12 w-12 mb-4 text-muted-foreground/50" />
+                                <p>No text extracted yet</p>
+                                <p className="text-sm text-muted-foreground mt-2">Process the document to extract text</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* AWS Textract Response Section */}
+                        <div className="border rounded-md overflow-hidden bg-muted/10">
+                          <div
+                            className="p-3 border-b bg-muted/20 flex justify-between items-center cursor-pointer"
+                            onClick={() => setTextractResponseCollapsed(!textractResponseCollapsed)}
+                          >
+                            <h3 className="text-lg font-medium">AWS Textract Response</h3>
+                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${textractResponseCollapsed ? "rotate-180" : ""}`} />
+                          </div>
+                          <div id="textract-response-content" className={textractResponseCollapsed ? "hidden" : "p-4"}>
+                            {rawTextractData ? (
+                              <div className="relative">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="absolute right-2 top-2"
+                                  onClick={() => {
+                                    if (rawTextractData) {
+                                      navigator.clipboard.writeText(JSON.stringify(rawTextractData, null, 2));
+                                      toast({
+                                        title: "Copied to clipboard",
+                                        variant: "default"
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                                <pre className="text-xs whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                                  {JSON.stringify(rawTextractData, null, 2)}
+                                </pre>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground min-h-[200px]">
+                                <FileJson className="h-12 w-12 mb-4 text-muted-foreground/50" />
+                                <p>No Textract response available</p>
+                                <p className="text-sm text-muted-foreground mt-2">Process a document to see the raw Textract response</p>
+                              </div>
                             )}
                           </div>
                         </div>
                       </div>
-                    )}
-                    <div className="max-h-[550px] overflow-auto p-3">
-                      <DocumentViewer 
-                        imageUrl={imageUrl} 
-                        fileType={file?.type}
-                        onPdfLoadError={handlePdfViewerError}
-                      />
-                    </div>
-                  </div>
-                </TabsContent>
-                
-                {/* Add new extracted tab content */}
-                <TabsContent value="extracted" className="mt-0">
-                  <div className="border rounded-md overflow-hidden bg-muted/20 p-4">
-                    {/* Remove info alert box */}
+                    </TabsContent>
                     
-                    {/* Enhanced data elements table showing all configured elements */}
-                    {activeDocType && (
-                      <div className="space-y-4">
-                        {/* Collapsible Required Data Elements section */}
-                        <div className="border rounded-md overflow-hidden bg-muted/10">
-                          <div 
-                            className="p-3 border-b bg-muted/20 flex justify-between items-center cursor-pointer"
-                            onClick={() => setRequiredElementsCollapsed(!requiredElementsCollapsed)}
-                          >
-                            <h3 className="text-lg font-medium">Required Data Elements</h3>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${requiredElementsCollapsed ? "rotate-180" : ""}`} />
-                          </div>
-                          <div id="required-data-elements-content" className={requiredElementsCollapsed ? "hidden" : "p-2"}>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="w-[40%]">Field Name</TableHead>
-                                  <TableHead className="w-[15%]">Type</TableHead>
-                                  <TableHead className="w-[15%]">Category</TableHead>
-                                  <TableHead className="w-[15%]">Action</TableHead>
-                                  <TableHead className="w-[15%]">Identified</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {/* Render document type data elements */}
-                                {activeDocType.dataElements
-                                  .map(element => {
-                                    // Check if this element was found in extracted elements
-                                    const isIdentified = extractedElements.some(
-                                      extractedElement => {
-                                        const typedElement = extractedElement as ExtendedRedactionElement;
-                                        return typedElement.label === element.name && !typedElement.missing;
-                                      }
-                                    );
-                                    
-                                    return (
-                                      <TableRow key={element.id}>
-                                        <TableCell className="font-medium">
-                                          {element.name}
-                                          {element.required && (
-                                            <Badge variant="outline" className="ml-2 text-xs">Required</Badge>
-                                          )}
-                                        </TableCell>
-                                        <TableCell>{element.type}</TableCell>
-                                        <TableCell>
-                                          <Badge variant={
-                                            element.category === 'PII' ? "destructive" : 
-                                            element.category === 'Financial' ? "default" :
-                                            "secondary"
-                                          } className="text-xs">
-                                            {element.category}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge variant={
-                                            element.action === 'Redact' ? "destructive" : 
-                                            element.action === 'ExtractAndRedact' ? "default" : 
-                                            element.action === 'Extract' ? "secondary" :
-                                            "outline"
-                                          } className="text-xs">
-                                            {element.action}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge variant={isIdentified ? "default" : "outline"} className={`text-xs ${isIdentified ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-gray-100 text-gray-800 hover:bg-gray-200"}`}>
-                                            {isIdentified ? "Yes" : "No"}
-                                          </Badge>
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  })
-                                }
-                                
-                                {/* Render subtype data elements if a subtype is selected */}
-                                {selectedSubTypeId && activeDocType.subTypes?.find(st => st.id === selectedSubTypeId)?.dataElements
-                                  .map(element => {
-                                    // Check if this element was found in extracted elements
-                                    const isIdentified = extractedElements.some(
-                                      extractedElement => {
-                                        const typedElement = extractedElement as ExtendedRedactionElement;
-                                        return typedElement.label === element.name && !typedElement.missing;
-                                      }
-                                    );
-                                    
-                                    return (
-                                      <TableRow key={element.id} className="bg-muted/10">
-                                        <TableCell className="font-medium">
-                                          {element.name}
-                                          {element.required && (
-                                            <Badge variant="outline" className="ml-2 text-xs">Required</Badge>
-                                          )}
-                                          <Badge variant="secondary" className="ml-2 text-xs">Subtype</Badge>
-                                        </TableCell>
-                                        <TableCell>{element.type}</TableCell>
-                                        <TableCell>
-                                          <Badge variant={
-                                            element.category === 'PII' ? "destructive" : 
-                                            element.category === 'Financial' ? "default" :
-                                            "secondary"
-                                          } className="text-xs">
-                                            {element.category}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge variant={
-                                            element.action === 'Redact' ? "destructive" : 
-                                            element.action === 'ExtractAndRedact' ? "default" : 
-                                            element.action === 'Extract' ? "secondary" :
-                                            "outline"
-                                          } className="text-xs">
-                                            {element.action}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge variant={isIdentified ? "default" : "outline"} className={`text-xs ${isIdentified ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-gray-100 text-gray-800 hover:bg-gray-200"}`}>
-                                            {isIdentified ? "Yes" : "No"}
-                                          </Badge>
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  })
-                                }
-                              </TableBody>
-                            </Table>
+                    <TabsContent value="summary" className="mt-0">
+                      <div className="border rounded-md overflow-hidden bg-muted/20 p-4">
+                        <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4 text-sm text-blue-800 flex items-start">
+                          <Info className="h-5 w-5 mr-2 flex-shrink-0 text-blue-500" />
+                          <div>
+                            <p className="font-medium mb-1">Document Summary</p>
+                            <p>This tab shows a summary of the document's content and identified elements.</p>
                           </div>
                         </div>
-                      </div>
-                    )}
-                    
-                    {/* Extracted elements table (show only if we have extracted elements) */}
-                    {extractedElements.length > 0 && (
-                      <div className="space-y-4 mt-6">
-                        {/* Collapsible Extracted Data section */}
-                        <div className="border rounded-md overflow-hidden bg-muted/10">
-                          <div 
-                            className="p-3 border-b bg-muted/20 flex justify-between items-center cursor-pointer"
-                            onClick={() => setExtractedDataCollapsed(!extractedDataCollapsed)}
-                          >
-                            <h3 className="text-lg font-medium">Extracted Data</h3>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${extractedDataCollapsed ? "rotate-180" : ""}`} />
-                          </div>
-                          <div id="extracted-data-content" className={extractedDataCollapsed ? "hidden" : "p-2"}>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="w-[10%]">Select</TableHead>
-                                  <TableHead className="w-[50%]">Field</TableHead>
-                                  <TableHead className="w-[40%]">Value</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {extractedElements
-                                  .filter(element => {
-                                    // Filter out elements without labels or values for display
-                                    const typedElement = element as ExtendedRedactionElement;
-                                    return typedElement.label && typedElement.text && !typedElement.missing;
-                                  })
-                                  .map(element => {
-                                    const typedElement = element as ExtendedRedactionElement;
-                                    return (
-                                      <TableRow key={element.id}>
-                                        <TableCell className="text-center">
-                                          <Checkbox 
-                                            checked={selectedElements.includes(element.id)}
-                                            onCheckedChange={() => toggleElementSelection(element.id)}
-                                            id={`select-element-${element.id}`}
-                                          />
-                                        </TableCell>
-                                        <TableCell className="font-medium">
-                                          <label 
-                                            htmlFor={`select-element-${element.id}`}
-                                            className="cursor-pointer"
-                                          >
-                                            {typedElement.label || "Unknown"}
-                                            {typedElement.category === 'PII' && (
-                                              <Badge variant="outline" className="ml-2 text-xs">PII</Badge>
-                                            )}
-                                            {typedElement.action && (
-                                              <Badge variant={typedElement.action === 'Redact' ? "destructive" : 
-                                                          typedElement.action === 'ExtractAndRedact' ? "default" : 
-                                                          "secondary"} 
-                                                    className="ml-2 text-xs">
-                                                {typedElement.action}
-                                              </Badge>
-                                            )}
-                                          </label>
-                                        </TableCell>
-                                        <TableCell className="break-words">
-                                          <div className="whitespace-normal">{typedElement.text || "Not found"}</div>
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  })}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Show message if no document type is selected */}
-                    {!activeDocType && (
-                      <div className="flex flex-col items-center justify-center p-6 text-center text-muted-foreground">
-                        <AlertTriangle className="h-8 w-8 mb-2 text-amber-500" />
-                        <p>Please classify the document to view available data elements</p>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-                
-                {/* Extracted Text tab */}
-                <TabsContent value="text" className="mt-0">
-                  <div className="space-y-4">
-                    {/* Section 1: Extracted Document Text */}
-                    <div className="border rounded-md overflow-hidden bg-muted/10">
-                      <div 
-                        className="p-3 border-b bg-muted/20 flex justify-between items-center cursor-pointer"
-                        onClick={() => setExtractedTextCollapsed(!extractedTextCollapsed)}
-                      >
-                        <h3 className="text-lg font-medium">Extracted Document Text</h3>
-                        <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${extractedTextCollapsed ? "rotate-180" : ""}`} />
-                      </div>
-                      <div id="extracted-text-content" className={extractedTextCollapsed ? "hidden" : "p-4"}>
-                        {extractedText ? (
-                          <div className="relative">
-                            <Button 
-                              size="icon" 
-                              variant="ghost" 
-                              className="absolute top-2 right-2"
-                              onClick={() => {
-                                if (extractedText) {
-                                  navigator.clipboard.writeText(extractedText);
-                                  toast({
-                                    title: "Copied to clipboard",
-                                    description: "The extracted text has been copied to your clipboard",
-                                  });
-                                }
-                              }}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <pre className="text-xs whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-                              {extractedText}
+                        
+                        {documentSummary ? (
+                          <div>
+                            <h3 className="text-lg font-medium mb-2">Document Summary</h3>
+                            <pre className="bg-muted/50 p-3 rounded-md whitespace-pre-wrap text-sm">
+                              {documentSummary}
                             </pre>
                           </div>
                         ) : (
-                          <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground min-h-[200px]">
-                            <FileText className="h-12 w-12 mb-4 text-muted-foreground/50" />
-                            <p>No text extracted yet</p>
-                            <p className="text-sm text-muted-foreground mt-2">Process the document to extract text</p>
+                          <div className="text-center text-muted-foreground p-4">
+                            <p>No document summary available</p>
                           </div>
                         )}
                       </div>
-                    </div>
-                    
-                    {/* Section 2: Textract Response */}
-                    <div className="border rounded-md overflow-hidden bg-muted/10">
-                      <div 
-                        className="p-3 border-b bg-muted/20 flex justify-between items-center cursor-pointer"
-                        onClick={() => setTextractResponseCollapsed(!textractResponseCollapsed)}
-                      >
-                        <h3 className="text-lg font-medium">AWS Textract Response</h3>
-                        <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${textractResponseCollapsed ? "rotate-180" : ""}`} />
-                      </div>
-                      <div id="textract-response-content" className={textractResponseCollapsed ? "hidden" : "p-4"}>
-                        {rawTextractData ? (
-                          <div className="relative">
-                            <Button 
-                              size="icon" 
-                              variant="ghost" 
-                              className="absolute top-2 right-2"
-                              onClick={() => {
-                                if (rawTextractData) {
-                                  navigator.clipboard.writeText(JSON.stringify(rawTextractData, null, 2));
-                                  toast({
-                                    title: "Copied to clipboard",
-                                    description: "The Textract response has been copied to your clipboard",
-                                  });
-                                }
-                              }}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <pre className="text-xs whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-                              {JSON.stringify(rawTextractData, null, 2)}
-                            </pre>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground min-h-[200px]">
-                            <FileJson className="h-12 w-12 mb-4 text-muted-foreground/50" />
-                            <p>No Textract response available</p>
-                            <p className="text-sm text-muted-foreground mt-2">Process a document to see the raw Textract response</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </TabsContent>
-                
-                <TabsContent value="redacted" className="mt-0">
-                  <div className="border rounded-md overflow-hidden bg-muted/20 p-1">
-                    <div className="flex justify-end mb-2 px-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => {
-                          // Download redacted document
-                          const link = document.createElement("a");
-                          if (redactedImageUrl) {
-                            // Download using the redacted image URL
-                            link.href = redactedImageUrl;
-                            link.download = `redacted-${file?.name || "document"}.png`;
-                            document.body.appendChild(link);
-                            link.click();
-                            URL.revokeObjectURL(redactedImageUrl);
-                            document.body.removeChild(link);
-                          }
-                        }}
-                      >
-                        <FileUp className="h-4 w-4 mr-2" />
-                        Download Redacted
-                      </Button>
-                    </div>
-                    <div className="max-h-[550px] overflow-auto p-3">
-                      {redactedImageUrl ? (
-                        <DocumentViewer 
-                          imageUrl={redactedImageUrl as string} 
-                          fileType={file?.type}
-                          onPdfLoadError={handlePdfViewerError}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-64">
-                          <p className="text-muted-foreground">No redacted image available</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </TabsContent>
-                
-                {/* Document Summary tab */}
-                <TabsContent value="summary" className="mt-0">
-                  <div className="border rounded-md overflow-hidden bg-muted/20 p-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4 text-sm text-blue-800 flex items-start">
-                      <Info className="h-5 w-5 mr-2 flex-shrink-0 text-blue-500" />
-                      <div>
-                        <p className="font-medium mb-1">Document Summary</p>
-                        <p>This tab shows a summary of the document's content and identified elements.</p>
-                      </div>
-                    </div>
-                    
-                    {documentSummary ? (
-                      <div>
-                        <h3 className="text-lg font-medium mb-2">Document Summary</h3>
-                        <pre className="bg-muted/50 p-3 rounded-md whitespace-pre-wrap text-sm">
-                          {documentSummary}
-                        </pre>
-                      </div>
-                    ) : (
-                      <div className="text-center text-muted-foreground p-4">
-                        No document summary available.
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground bg-muted/10 rounded-md min-h-[300px]">
                 <FileText className="h-12 w-12 mb-4 text-muted-foreground/50" />
