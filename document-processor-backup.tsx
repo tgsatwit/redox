@@ -3226,8 +3226,8 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="mb-4">
                   <TabsTrigger value="original">Original Document</TabsTrigger>
-                  <TabsTrigger value="extracted">Extracted Data</TabsTrigger>
                   {extractedText && <TabsTrigger value="text">Extracted Text</TabsTrigger>}
+                  <TabsTrigger value="extracted">Extracted Data</TabsTrigger>
                   {redactedImageUrl && <TabsTrigger value="redacted">Redacted Document</TabsTrigger>}
                 </TabsList>
                 

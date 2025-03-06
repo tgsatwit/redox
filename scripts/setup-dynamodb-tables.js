@@ -49,6 +49,9 @@ const SUB_TYPE_TABLE = process.env.DYNAMODB_SUBTYPE_TABLE || 'document-processor
 const DATA_ELEMENT_TABLE = process.env.DYNAMODB_ELEMENT_TABLE || 'document-processor-elements';
 const TRAINING_DATASET_TABLE = process.env.DYNAMODB_DATASET_TABLE || 'document-processor-datasets';
 const TRAINING_EXAMPLE_TABLE = process.env.DYNAMODB_EXAMPLE_TABLE || 'document-processor-examples';
+const PROMPT_CATEGORIES_TABLE = process.env.DYNAMODB_PROMPT_CATEGORIES_TABLE || 'document-processor-prompt-categories';
+const PROMPTS_TABLE = process.env.DYNAMODB_PROMPTS_TABLE || 'document-processor-prompts';
+const RETENTION_POLICY_TABLE = process.env.DYNAMODB_RETENTION_POLICY_TABLE || 'document-processor-retention-policies';
 
 // Create DynamoDB client
 const dynamoClient = new DynamoDBClient(getDynamoDBConfig());
@@ -421,6 +424,124 @@ async function setupTrainingExampleTable() {
   }
 }
 
+// Setup prompt categories table
+async function setupPromptCategoriesTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(PROMPT_CATEGORIES_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${PROMPT_CATEGORIES_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: PROMPT_CATEGORIES_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${PROMPT_CATEGORIES_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${PROMPT_CATEGORIES_TABLE} table:`, error);
+  }
+}
+
+// Setup prompts table
+async function setupPromptsTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(PROMPTS_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${PROMPTS_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: PROMPTS_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' },
+        { AttributeName: 'categoryId', AttributeType: 'S' }
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'categoryId-index',
+          KeySchema: [
+            { AttributeName: 'categoryId', KeyType: 'HASH' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${PROMPTS_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${PROMPTS_TABLE} table:`, error);
+  }
+}
+
+// Setup retention policies table
+async function setupRetentionPoliciesTable() {
+  try {
+    // Check if table exists
+    const listTablesResponse = await dynamoClient.send(new ListTablesCommand({}));
+    const tableExists = listTablesResponse.TableNames.includes(RETENTION_POLICY_TABLE);
+    
+    if (tableExists) {
+      console.log(`Table '${RETENTION_POLICY_TABLE}' already exists.`);
+      return;
+    }
+    
+    const tableParams = {
+      TableName: RETENTION_POLICY_TABLE,
+      KeySchema: [
+        { AttributeName: 'id', KeyType: 'HASH' } // Partition key
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'id', AttributeType: 'S' }
+      ],
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      }
+    };
+    
+    console.log(`Creating DynamoDB table: ${RETENTION_POLICY_TABLE}...`);
+    const createTableResponse = await dynamoClient.send(new CreateTableCommand(tableParams));
+    console.log('Table created successfully:', createTableResponse.TableDescription.TableName);
+  } catch (error) {
+    console.error(`Error setting up ${RETENTION_POLICY_TABLE} table:`, error);
+  }
+}
+
 // Run the setup
 async function setupAllTables() {
   try {
@@ -431,6 +552,9 @@ async function setupAllTables() {
     await setupDataElementTable();
     await setupTrainingDatasetTable();
     await setupTrainingExampleTable();
+    await setupPromptCategoriesTable();
+    await setupPromptsTable();
+    await setupRetentionPoliciesTable();
     console.log('All DynamoDB tables created successfully');
   } catch (error) {
     console.error('Error setting up DynamoDB tables:', error);

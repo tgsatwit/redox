@@ -180,7 +180,7 @@ export async function POST(request: Request) {
       confidence: calculateAverageConfidence(textractResponse.Blocks || []),
       extractedText,
       extractedFields,
-      textractResponse: process.env.NODE_ENV === 'development' ? textractResponse : undefined
+      textractResponse: textractResponse
     })
   } catch (error) {
     console.error("Error processing document:", error)

@@ -55,6 +55,7 @@ export async function processMultiPagePdf(
   extractedText?: string;
   extractedFields?: RedactionElement[];
   pages?: { pageIndex: number; success: boolean; error?: string }[];
+  textractResponse?: any;
 }> {
   try {
     const { documentType, onProgress } = options;
@@ -86,6 +87,7 @@ export async function processMultiPagePdf(
     let allExtractedText = '';
     const allExtractedFields: RedactionElement[] = [];
     const pageResults: { pageIndex: number; success: boolean; error?: string }[] = [];
+    const allTextractResponses: any[] = [];
     
     // Process each page as an image
     for (let i = 0; i < pagesResult.pages.length; i++) {
@@ -172,6 +174,14 @@ export async function processMultiPagePdf(
           allExtractedFields.push(...fieldsWithPageIndex);
         }
         
+        // Store the Textract response if available
+        if (pageData.textractResponse) {
+          allTextractResponses.push({
+            pageIndex,
+            response: pageData.textractResponse
+          });
+        }
+        
         pageResults.push({ pageIndex, success: true });
         onProgress?.(`Page ${pageIndex + 1} processed successfully`, i + 1, pagesResult.pages.length);
       } catch (pageError) {
@@ -211,7 +221,8 @@ export async function processMultiPagePdf(
       success: true,
       extractedText: allExtractedText,
       extractedFields: allExtractedFields,
-      pages: pageResults
+      pages: pageResults,
+      textractResponse: allTextractResponses.length > 0 ? allTextractResponses : undefined
     };
   } catch (error) {
     console.error('Error in processMultiPagePdf:', error);

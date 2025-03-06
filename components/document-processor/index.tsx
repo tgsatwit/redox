@@ -61,6 +61,8 @@ import {
   CheckIcon 
 } from "lucide-react";
 
+import { useCallback, useEffect } from 'react';
+
 export function DocumentProcessor() {
   const {
     state: processingState,
@@ -77,7 +79,8 @@ export function DocumentProcessor() {
     state: classificationState,
     updateState: updateClassificationState,
     handleClassifyDocument,
-    handleVerification
+    handleVerification,
+    resetClassification
   } = useDocumentClassification();
 
   const { config, activeDocumentTypeId, setActiveDocumentType } = useConfigStoreDB();
@@ -86,8 +89,19 @@ export function DocumentProcessor() {
   // Get active document type
   const activeDocType = config.documentTypes.find((dt: { id: string }) => dt.id === activeDocumentTypeId);
   
+  // Log when activeDocumentTypeId changes
+  useEffect(() => {
+    console.log('Document processor index - activeDocumentTypeId:', activeDocumentTypeId);
+  }, [activeDocumentTypeId]);
+  
   // Get available document types (only active ones)
   const availableDocTypes = config.documentTypes.filter((dt: { isActive: boolean }) => dt.isActive);
+  
+  // Enhanced reset workflow function that also resets classification
+  const handleResetWorkflow = useCallback(() => {
+    resetWorkflow();
+    resetClassification();
+  }, [resetWorkflow, resetClassification]);
 
   return (
     <div className="space-y-6">
@@ -99,7 +113,7 @@ export function DocumentProcessor() {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium">Upload Document</h3>
                 <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" onClick={resetWorkflow}>
+                  <Button variant="ghost" size="sm" onClick={handleResetWorkflow}>
                     <X className="h-4 w-4 mr-2" />
                     Cancel
                   </Button>
@@ -134,7 +148,7 @@ export function DocumentProcessor() {
                     <ChevronDown className="h-4 w-4 mr-2" rotate={270} />
                     Back
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={resetWorkflow}>
+                  <Button variant="ghost" size="sm" onClick={handleResetWorkflow}>
                     <X className="h-4 w-4 mr-2" />
                     Cancel
                   </Button>
@@ -162,6 +176,19 @@ export function DocumentProcessor() {
                             selectedSubTypeId: null,
                             feedbackSubmitted: false 
                           });
+                          
+                          // Set classification result with 100% confidence for manual selection
+                          if (value) {
+                            const selectedDocType = config.documentTypes.find(dt => dt.id === value);
+                            if (selectedDocType) {
+                              updateClassificationState({
+                                classificationResult: {
+                                  documentType: selectedDocType.name,
+                                  confidence: 1.0, // 100% confidence for manual selection
+                                }
+                              });
+                            }
+                          }
                         }}
                       >
                         <SelectTrigger className="w-full">
@@ -205,7 +232,7 @@ export function DocumentProcessor() {
                     <ChevronDown className="h-4 w-4 mr-2" rotate={270} />
                     Back
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={resetWorkflow}>
+                  <Button variant="ghost" size="sm" onClick={handleResetWorkflow}>
                     <X className="h-4 w-4 mr-2" />
                     Cancel
                   </Button>
@@ -305,6 +332,47 @@ export function DocumentProcessor() {
               <TabsTrigger value="redacted">Redacted</TabsTrigger>
               <TabsTrigger value="text">Text</TabsTrigger>
             </TabsList>
+            
+            {/* Classification info box */}
+            {processingState.imageUrl && (
+              <div className="my-3 border rounded-md p-3 bg-muted/10">
+                <div className="flex flex-col space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Document Classification:</span>
+                    {activeDocumentTypeId ? (
+                      <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary font-medium">
+                        {classificationState.gptClassificationResult?.confidence 
+                          ? `${(classificationState.gptClassificationResult.confidence * 100).toFixed(0)}% Confidence`
+                          : classificationState.classificationResult?.confidence 
+                          ? `${(classificationState.classificationResult.confidence * 100).toFixed(0)}% Confidence`
+                          : !classificationState.useAutoClassification && activeDocumentTypeId
+                          ? '100% Confidence'
+                          : ''}
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium">
+                        Unclassified
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">
+                      {activeDocumentTypeId 
+                        ? config.documentTypes.find(dt => dt.id === activeDocumentTypeId)?.name || 'Unknown'
+                        : 'Unclassified'}
+                    </span>
+                    {classificationState.selectedSubTypeId && activeDocumentTypeId && (
+                      <>
+                        <span className="text-muted-foreground text-sm">→</span>
+                        <span className="text-sm">
+                          {config.documentTypes.find(dt => dt.id === activeDocumentTypeId)?.subTypes?.find(st => st.id === classificationState.selectedSubTypeId)?.name || ''}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             
             <TabsContent value="original">
               <DocumentViewer

@@ -7,6 +7,8 @@ export interface FileUploaderProps {
   acceptedTypes?: string[];
   isProcessing?: boolean;
   file?: File | null;
+  onWorkflowSelect?: (workflowId: string, isOneOff: boolean) => void;
+  availableWorkflows?: Array<{ id: string; name: string }>;
 }
 
 export interface DocumentViewerProps {

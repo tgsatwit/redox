@@ -35,6 +35,10 @@ export interface ExtendedRedactionElement extends Omit<RedactionElement, 'boundi
   value?: string | null;
   boundingBox: AnyBoundingBox | null | undefined;
   action?: DataElementAction;
+  configId?: string;
+  matchedConfigId?: string;
+  matchedConfigName?: string;
+  matchConfidence?: number;
 }
 
 export type DataElementAction = 'Extract' | 'Redact' | 'ExtractAndRedact';

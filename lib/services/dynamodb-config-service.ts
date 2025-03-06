@@ -2130,13 +2130,29 @@ export class DynamoDBConfigService {
         return getFromLocalStorage<PromptCategory[]>(LS_PROMPT_CATEGORIES_KEY, []);
       }
 
-      const response = await docClient.send(
+      // First, get all categories
+      const categoriesResponse = await docClient.send(
         new ScanCommand({
           TableName: PROMPT_CATEGORIES_TABLE,
         })
       );
 
-      return response.Items as PromptCategory[] || [];
+      const categories = (categoriesResponse.Items || []) as PromptCategory[];
+      console.log("Fetched categories:", categories);
+
+      // For each category, get its prompts
+      for (const category of categories) {
+        try {
+          const prompts = await this.getPrompts(category.id);
+          category.prompts = prompts;
+        } catch (error) {
+          console.error(`Error fetching prompts for category ${category.id}:`, error);
+          category.prompts = [];
+        }
+      }
+      
+      console.log("Categories with prompts:", categories);
+      return categories;
     } catch (error) {
       console.error('Error fetching prompt categories:', error);
       
@@ -2168,6 +2184,7 @@ export class DynamoDBConfigService {
         return newCategory;
       }
 
+      console.log("Adding new category to DynamoDB:", newCategory);
       await docClient.send(
         new PutCommand({
           TableName: PROMPT_CATEGORIES_TABLE,
@@ -2211,21 +2228,65 @@ export class DynamoDBConfigService {
         return;
       }
 
+      console.log(`Updating prompt category ${id} with updates:`, updates);
+      
+      // Build update expression and attribute values dynamically based on provided updates
+      const updateExpressions: string[] = [];
+      const expressionAttributeNames: Record<string, string> = {};
+      const expressionAttributeValues: Record<string, any> = {};
+      
+      // Standard fields
+      if (updates.name !== undefined) {
+        updateExpressions.push('#name = :name');
+        expressionAttributeNames['#name'] = 'name';
+        expressionAttributeValues[':name'] = updates.name;
+      }
+      
+      if (updates.description !== undefined) {
+        updateExpressions.push('#description = :description');
+        expressionAttributeNames['#description'] = 'description';
+        expressionAttributeValues[':description'] = updates.description;
+      }
+      
+      // Model field
+      if (updates.model !== undefined) {
+        updateExpressions.push('#model = :model');
+        expressionAttributeNames['#model'] = 'model';
+        expressionAttributeValues[':model'] = updates.model;
+      }
+      
+      // Temperature field
+      if (updates.temperature !== undefined) {
+        updateExpressions.push('#temperature = :temperature');
+        expressionAttributeNames['#temperature'] = 'temperature';
+        expressionAttributeValues[':temperature'] = updates.temperature;
+      }
+      
+      // Response format field
+      if (updates.responseFormat !== undefined) {
+        updateExpressions.push('#responseFormat = :responseFormat');
+        expressionAttributeNames['#responseFormat'] = 'responseFormat';
+        expressionAttributeValues[':responseFormat'] = updates.responseFormat;
+      }
+      
+      // Only proceed if there are fields to update
+      if (updateExpressions.length === 0) {
+        console.log('No fields to update for prompt category');
+        return;
+      }
+      
+      // Execute the update
       await docClient.send(
         new UpdateCommand({
           TableName: PROMPT_CATEGORIES_TABLE,
           Key: { id },
-          UpdateExpression: 'SET #name = :name, #description = :description',
-          ExpressionAttributeNames: {
-            '#name': 'name',
-            '#description': 'description'
-          },
-          ExpressionAttributeValues: {
-            ':name': updates.name,
-            ':description': updates.description
-          }
+          UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+          ExpressionAttributeNames: expressionAttributeNames,
+          ExpressionAttributeValues: expressionAttributeValues
         })
       );
+      
+      console.log(`Prompt category ${id} updated successfully`);
     } catch (error) {
       console.error(`Error updating prompt category ${id}:`, error);
       
@@ -2289,17 +2350,38 @@ export class DynamoDBConfigService {
         return category?.prompts || [];
       }
 
-      const response = await docClient.send(
-        new QueryCommand({
-          TableName: PROMPTS_TABLE,
-          KeyConditionExpression: 'categoryId = :categoryId',
-          ExpressionAttributeValues: {
-            ':categoryId': categoryId
-          }
-        })
-      );
-
-      return response.Items as Prompt[] || [];
+      try {
+        // First try using the GSI (which is more efficient)
+        const response = await docClient.send(
+          new QueryCommand({
+            TableName: PROMPTS_TABLE,
+            IndexName: 'categoryId-index',
+            KeyConditionExpression: 'categoryId = :categoryId',
+            ExpressionAttributeValues: {
+              ':categoryId': categoryId
+            }
+          })
+        );
+        
+        console.log(`Fetched prompts for category ${categoryId} using GSI:`, response.Items);
+        return response.Items as Prompt[] || [];
+      } catch (error) {
+        // If permission error using GSI, fall back to scanning the whole table with a filter
+        console.warn('Error using GSI for prompt query, falling back to scan with filter:', error);
+        
+        const response = await docClient.send(
+          new ScanCommand({
+            TableName: PROMPTS_TABLE,
+            FilterExpression: 'categoryId = :categoryId',
+            ExpressionAttributeValues: {
+              ':categoryId': categoryId
+            }
+          })
+        );
+        
+        console.log(`Fetched prompts for category ${categoryId} using scan with filter:`, response.Items);
+        return response.Items as Prompt[] || [];
+      }
     } catch (error) {
       console.error(`Error fetching prompts for category ${categoryId}:`, error);
       
@@ -2396,27 +2478,61 @@ export class DynamoDBConfigService {
         return;
       }
 
+      console.log(`Updating prompt ${promptId} for category ${categoryId} with updates:`, updates);
+      
+      // Build the update expression dynamically based on the provided updates
+      const updateExpressions: string[] = [];
+      const expressionAttributeNames: Record<string, string> = {};
+      const expressionAttributeValues: Record<string, any> = {};
+      
+      // Always update the timestamp
+      updateExpressions.push('#updatedAt = :updatedAt');
+      expressionAttributeNames['#updatedAt'] = 'updatedAt';
+      expressionAttributeValues[':updatedAt'] = Date.now();
+      
+      // Add other fields if they're in the updates
+      if (updates.name !== undefined) {
+        updateExpressions.push('#name = :name');
+        expressionAttributeNames['#name'] = 'name';
+        expressionAttributeValues[':name'] = updates.name;
+      }
+      
+      if (updates.description !== undefined) {
+        updateExpressions.push('#description = :description');
+        expressionAttributeNames['#description'] = 'description';
+        expressionAttributeValues[':description'] = updates.description;
+      }
+      
+      if (updates.role !== undefined) {
+        updateExpressions.push('#role = :role');
+        expressionAttributeNames['#role'] = 'role';
+        expressionAttributeValues[':role'] = updates.role;
+      }
+      
+      if (updates.content !== undefined) {
+        updateExpressions.push('#content = :content');
+        expressionAttributeNames['#content'] = 'content';
+        expressionAttributeValues[':content'] = updates.content;
+      }
+      
+      if (updates.isActive !== undefined) {
+        updateExpressions.push('#isActive = :isActive');
+        expressionAttributeNames['#isActive'] = 'isActive';
+        expressionAttributeValues[':isActive'] = updates.isActive;
+      }
+      
+      // Only use the id as the key, not categoryId
       await docClient.send(
         new UpdateCommand({
           TableName: PROMPTS_TABLE,
-          Key: { categoryId, id: promptId },
-          UpdateExpression: 'SET #name = :name, #description = :description, #role = :role, #content = :content, #updatedAt = :updatedAt',
-          ExpressionAttributeNames: {
-            '#name': 'name',
-            '#description': 'description',
-            '#role': 'role',
-            '#content': 'content',
-            '#updatedAt': 'updatedAt'
-          },
-          ExpressionAttributeValues: {
-            ':name': updates.name,
-            ':description': updates.description,
-            ':role': updates.role,
-            ':content': updates.content,
-            ':updatedAt': Date.now()
-          }
+          Key: { id: promptId },
+          UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+          ExpressionAttributeNames: expressionAttributeNames,
+          ExpressionAttributeValues: expressionAttributeValues
         })
       );
+      
+      console.log(`Prompt ${promptId} updated successfully`);
     } catch (error) {
       console.error(`Error updating prompt ${promptId}:`, error);
       
@@ -2461,12 +2577,14 @@ export class DynamoDBConfigService {
         return;
       }
 
+      console.log(`Deleting prompt ${promptId} from category ${categoryId}`);
       await docClient.send(
         new DeleteCommand({
           TableName: PROMPTS_TABLE,
-          Key: { categoryId, id: promptId }
+          Key: { id: promptId }
         })
       );
+      console.log(`Prompt ${promptId} deleted successfully`);
     } catch (error) {
       console.error(`Error deleting prompt ${promptId}:`, error);
       

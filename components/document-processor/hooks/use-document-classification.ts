@@ -159,10 +159,27 @@ export function useDocumentClassification() {
     }
   }, [config.documentTypes, setActiveDocumentType, state.classificationResult, state.selectedSubTypeId, updateState, toast]);
 
+  // Reset classification state and active document type
+  const resetClassification = useCallback(() => {
+    updateState({
+      isClassifying: false,
+      classificationResult: null,
+      verificationOpen: false,
+      feedbackSubmitted: false,
+      selectedSubTypeId: null,
+      isClassifyingWithGPT: false,
+      gptClassificationResult: null
+    });
+    
+    // Reset active document type
+    setActiveDocumentType(null);
+  }, [updateState, setActiveDocumentType]);
+
   return {
     state,
     updateState,
     handleClassifyDocument,
-    handleVerification
+    handleVerification,
+    resetClassification
   };
 } 

@@ -48,6 +48,7 @@ export interface DocumentData {
   extractedText: string
   extractedFields: ExtractedField[]
   classificationResult?: ClassificationResult | null
+  textractResponse?: any // Raw Textract response for debugging
 }
 
 // Document configuration types
@@ -185,5 +186,11 @@ export interface PromptCategory {
   name: string;
   description: string;
   prompts: Prompt[];
+  model?: string; // The AI model to use (e.g., 'gpt-4-turbo', 'claude-3-opus')
+  responseFormat?: {
+    type: 'text' | 'json_object' | 'json';
+    schema?: string; // Optional JSON schema for structured responses
+  };
+  temperature?: number; // Value between 0 and 2, default might be 1
 }
 

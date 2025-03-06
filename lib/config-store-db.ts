@@ -81,7 +81,7 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
   isInitialized: false,
   error: null,
   config: initialConfig,
-  activeDocumentTypeId: initialConfig.documentTypes[0]?.id || null,
+  activeDocumentTypeId: null,
   
   initialize: async () => {
     try {
@@ -153,9 +153,23 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
         console.error('Error loading retention policies:', error);
       }
       
+      // Load prompt categories
+      try {
+        console.log('Loading prompt categories...');
+        const promptCategoriesResponse = await fetch('/api/config/prompt-categories');
+        if (promptCategoriesResponse.ok) {
+          appConfig.promptCategories = await promptCategoriesResponse.json();
+          console.log('Loaded prompt categories:', appConfig.promptCategories);
+        } else {
+          console.warn('Failed to load prompt categories');
+        }
+      } catch (error) {
+        console.error('Error loading prompt categories:', error);
+      }
+      
       set({
         config: appConfig,
-        activeDocumentTypeId: documentTypes[0]?.id || null,
+        activeDocumentTypeId: null,
         isInitialized: true,
         isLoading: false
       });
@@ -969,7 +983,7 @@ export const useConfigStoreDB = create<ConfigState>()((set, get) => ({
       // Update local state
       set({
         config: appConfig,
-        activeDocumentTypeId: appConfig.documentTypes[0]?.id || null,
+        activeDocumentTypeId: null,
         isLoading: false
       });
     } catch (error: any) {

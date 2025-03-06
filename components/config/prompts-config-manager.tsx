@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useConfigStoreDB } from "@/lib/config-store-db"
 import { Prompt, PromptCategory, PromptRole } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -36,13 +36,32 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 
 export function PromptsConfigManager() {
-  const { config, addPromptCategory, updatePromptCategory, deletePromptCategory, addPrompt, updatePrompt, deletePrompt } = useConfigStoreDB()
+  const { config, initialize, addPromptCategory, updatePromptCategory, deletePromptCategory, addPrompt, updatePrompt, deletePrompt } = useConfigStoreDB()
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
   const [isAddingCategory, setIsAddingCategory] = useState(false)
   const [isAddingPrompt, setIsAddingPrompt] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [activeTab, setActiveTab] = useState("prompts")
+  const [isEditingSettings, setIsEditingSettings] = useState(false)
+  const [categorySettings, setCategorySettings] = useState({
+    model: '',
+    responseFormatType: 'text' as 'text' | 'json_object' | 'json',
+    responseFormatSchema: '',
+    temperature: 1
+  })
+
+  useEffect(() => {
+    initialize().catch(error => {
+      console.error("Error initializing config:", error);
+    });
+  }, [initialize]);
+
+  useEffect(() => {
+    if (config.promptCategories?.length > 0 && !selectedCategory) {
+      setSelectedCategory(config.promptCategories[0].id);
+    }
+  }, [config.promptCategories, selectedCategory]);
 
   const [categoryForm, setCategoryForm] = useState({
     name: "",
@@ -159,6 +178,56 @@ export function PromptsConfigManager() {
   const activePrompt = selectedPrompt && activeCategory
     ? activeCategory.prompts.find(p => p.id === selectedPrompt)
     : null
+
+  const loadCategorySettings = (category: PromptCategory) => {
+    setCategorySettings({
+      model: category.model || '',
+      responseFormatType: category.responseFormat?.type || 'text',
+      responseFormatSchema: category.responseFormat?.schema || '',
+      temperature: category.temperature !== undefined ? category.temperature : 1
+    })
+  }
+
+  const handleEditSettings = () => {
+    if (activeCategory) {
+      loadCategorySettings(activeCategory)
+      setIsEditingSettings(true)
+    }
+  }
+
+  const handleCancelEditSettings = () => {
+    setIsEditingSettings(false)
+  }
+
+  const handleSaveSettings = async () => {
+    if (!selectedCategory) return
+
+    try {
+      const settings = {
+        model: categorySettings.model.trim() || undefined,
+        responseFormat: categorySettings.responseFormatType !== 'text' ? {
+          type: categorySettings.responseFormatType,
+          schema: categorySettings.responseFormatSchema.trim() || undefined
+        } : undefined,
+        temperature: categorySettings.temperature
+      }
+
+      await updatePromptCategory(selectedCategory, settings)
+      
+      toast({
+        title: "Success",
+        description: "Category settings updated successfully"
+      })
+      
+      setIsEditingSettings(false)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update category settings",
+        variant: "destructive"
+      })
+    }
+  }
 
   return (
     <div className="container mx-auto py-6">
@@ -284,16 +353,34 @@ export function PromptsConfigManager() {
                         ))}
                       </TabsContent>
 
-                      <TabsContent value="settings">
+                      <TabsContent value="settings" className="space-y-4">
                         <Card>
-                          <CardHeader>
-                            <CardTitle>Category Settings</CardTitle>
-                            <CardDescription>
-                              Manage settings for this prompt category
-                            </CardDescription>
+                          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <div>
+                              <CardTitle>Category Settings</CardTitle>
+                              <CardDescription>Manage this prompt category</CardDescription>
+                            </div>
+                            <div className="flex space-x-2">
+                              {!isEditingSettings ? (
+                                <Button onClick={handleEditSettings}>
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Edit Settings
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button variant="outline" onClick={handleCancelEditSettings}>
+                                    Cancel
+                                  </Button>
+                                  <Button onClick={handleSaveSettings}>
+                                    <Save className="mr-2 h-4 w-4" />
+                                    Save
+                                  </Button>
+                                </>
+                              )}
+                            </div>
                           </CardHeader>
                           <CardContent>
-                            <div className="space-y-4">
+                            <div className="space-y-6">
                               <div className="space-y-2">
                                 <Label>Category Name</Label>
                                 <Input value={activeCategory?.name} disabled />
@@ -302,8 +389,140 @@ export function PromptsConfigManager() {
                                 <Label>Description</Label>
                                 <Textarea value={activeCategory?.description} disabled />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Statistics</Label>
+                              
+                              <div className="border-t pt-6">
+                                <h3 className="text-lg font-medium mb-4">AI Model Settings</h3>
+                                <div className="space-y-6">
+                                  {/* Model selection */}
+                                  <div className="space-y-2">
+                                    <Label htmlFor="model">Model</Label>
+                                    {isEditingSettings ? (
+                                      <Select 
+                                        value={categorySettings.model || ''} 
+                                        onValueChange={(value) => setCategorySettings({...categorySettings, model: value})}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select a model" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="">Default</SelectItem>
+                                          <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                                          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                                          <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                                          <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
+                                          <SelectItem value="claude-3-sonnet">Claude 3 Sonnet</SelectItem>
+                                          <SelectItem value="claude-3-haiku">Claude 3 Haiku</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input 
+                                        value={activeCategory?.model || 'Default'} 
+                                        disabled 
+                                      />
+                                    )}
+                                    <p className="text-sm text-muted-foreground">
+                                      The AI model that will be used for this category's prompts
+                                    </p>
+                                  </div>
+
+                                  {/* Temperature setting */}
+                                  <div className="space-y-2">
+                                    <Label htmlFor="temperature">Temperature ({categorySettings.temperature})</Label>
+                                    {isEditingSettings ? (
+                                      <div className="flex items-center space-x-2">
+                                        <span className="text-sm">0</span>
+                                        <Input
+                                          id="temperature"
+                                          type="range"
+                                          min="0"
+                                          max="2"
+                                          step="0.1"
+                                          value={categorySettings.temperature}
+                                          onChange={(e) => setCategorySettings({
+                                            ...categorySettings, 
+                                            temperature: parseFloat(e.target.value)
+                                          })}
+                                          className="w-full"
+                                        />
+                                        <span className="text-sm">2</span>
+                                      </div>
+                                    ) : (
+                                      <Input 
+                                        value={activeCategory?.temperature !== undefined ? activeCategory.temperature : 'Default (1)'} 
+                                        disabled 
+                                      />
+                                    )}
+                                    <p className="text-sm text-muted-foreground">
+                                      Controls randomness: 0 is more deterministic, 2 is more creative
+                                    </p>
+                                  </div>
+
+                                  {/* Response format */}
+                                  <div className="space-y-2">
+                                    <Label htmlFor="responseFormat">Response Format</Label>
+                                    {isEditingSettings ? (
+                                      <Select 
+                                        value={categorySettings.responseFormatType} 
+                                        onValueChange={(value: 'text' | 'json_object' | 'json') => setCategorySettings({
+                                          ...categorySettings, 
+                                          responseFormatType: value
+                                        })}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select response format" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="text">Free-form text</SelectItem>
+                                          <SelectItem value="json_object">JSON object</SelectItem>
+                                          <SelectItem value="json">JSON (OpenAI)</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input 
+                                        value={activeCategory?.responseFormat?.type || 'Default (text)'} 
+                                        disabled 
+                                      />
+                                    )}
+                                    <p className="text-sm text-muted-foreground">
+                                      The format in which the AI should generate responses
+                                    </p>
+                                  </div>
+
+                                  {/* JSON Schema (only show if json_object or json is selected) */}
+                                  {(isEditingSettings && categorySettings.responseFormatType !== 'text') || 
+                                   (!isEditingSettings && activeCategory?.responseFormat?.type !== 'text' && activeCategory?.responseFormat?.schema) ? (
+                                    <div className="space-y-2">
+                                      <Label htmlFor="jsonSchema">JSON Schema</Label>
+                                      {isEditingSettings ? (
+                                        <Textarea 
+                                          id="jsonSchema"
+                                          placeholder="Enter a JSON schema..."
+                                          value={categorySettings.responseFormatSchema}
+                                          onChange={(e) => setCategorySettings({
+                                            ...categorySettings, 
+                                            responseFormatSchema: e.target.value
+                                          })}
+                                          className="font-mono text-sm"
+                                          rows={6}
+                                        />
+                                      ) : (
+                                        <Textarea 
+                                          value={activeCategory?.responseFormat?.schema || ''} 
+                                          disabled 
+                                          className="font-mono text-sm"
+                                          rows={6}
+                                        />
+                                      )}
+                                      <p className="text-sm text-muted-foreground">
+                                        Optional schema to structure JSON responses
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="border-t pt-6">
+                                <h3 className="text-lg font-medium mb-4">Statistics</h3>
                                 <div className="grid grid-cols-2 gap-4">
                                   <div className="space-y-1">
                                     <p className="text-sm font-medium">Total Prompts</p>

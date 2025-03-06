@@ -189,7 +189,8 @@ export async function POST(request: NextRequest) {
         extractedText,
         extractedFields,
         documentType,
-        success: true
+        success: true,
+        textractResponse: textractResponse
       });
     } catch (awsError) {
       console.error('AWS Error:', awsError);

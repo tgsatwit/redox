@@ -3028,6 +3028,14 @@ ${result.recommendations?.join('\n') || 'No recommendations provided'}
                   </div>
                   
                   {/* Remove the blue box with document type info */}
+                  {/* <div className="p-4 border rounded-md bg-blue-50 text-blue-700">
+                    <p className="font-medium">Selected document type: {activeDocType?.name}</p>
+                    {selectedSubTypeId && activeDocType?.subTypes && (
+                      <p className="mt-1">
+                        Sub-type: {activeDocType.subTypes.find(st => st.id === selectedSubTypeId)?.name}
+                      </p>
+                    )}
+                  </div> */}
 
                   {/* Amalgamated Table with Required and Extracted Data */}
                   <div className="border rounded-md overflow-hidden bg-muted/10">
